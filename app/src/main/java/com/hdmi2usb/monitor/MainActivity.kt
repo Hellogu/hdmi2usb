@@ -29,6 +29,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     private var plugMonitor: PlugMonitor? = null
     private var surfaceReady = false
     private var retryCount = 0
+    private var streaming = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val reopenRunnable = Runnable { tryOpenCamera() }
@@ -91,6 +92,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     }
 
     private fun tryOpenCamera() {
+        // 已在流时直接返回，防止重试回调/重复插卡导致对已打开的相机再次 start
+        if (streaming) return
         val c = controller ?: return
         val id = c.findExternalCamera()
         if (id == null) {
@@ -105,6 +108,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
             }
         } else {
             statusText.visibility = View.GONE
+            mainHandler.removeCallbacks(reopenRunnable)
             c.start(id, displayView.surfaceView.holder)
         }
     }
@@ -123,15 +127,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     }
 
     override fun onStreamReady(width: Int, height: Int) {
+        streaming = true
         displayView.onStreamConfigured(width, height)
     }
 
     override fun onUnavailable() {
+        streaming = false
         Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_SHORT).show()
         finish()
     }
 
     private fun onCaptureCardDetached() {
+        streaming = false
         controller?.close()
         finish()
     }

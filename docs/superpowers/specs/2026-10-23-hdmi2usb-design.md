@@ -77,6 +77,8 @@ MainActivity（唯一 Activity：全屏沉浸式、KEEP_SCREEN_ON、权限申请
 
 所有退出路径先同步关闭 CameraDevice/CaptureSession，再 finish()。
 
+**已知限制**：屏灭/退后台后相机不停止：surfaceDestroyed 时未关闭相机（CameraController.close() 为终态，无法软停止）。若 HAL 对已 abandon 的 surface 报错，可能级联到 onUnavailable 导致后台 finish。后续如需支持后台常驻，应给 CameraController 增加 stop()/restart 能力后改为 surfaceDestroyed→stop、surfaceCreated→start。
+
 ## 7. 测试策略
 
 硬件强绑定（需要真实采集卡），采用纯逻辑单测 + 人工验收：

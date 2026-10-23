@@ -38,11 +38,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        setContentView(R.layout.activity_main)
+        // insetsController 依赖 DecorView，必须在 setContentView 之后获取
         window.insetsController?.apply {
             hide(WindowInsets.Type.systemBars())
             systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        setContentView(R.layout.activity_main)
         displayView = findViewById(R.id.display)
         statusText = findViewById(R.id.status_text)
         permissionPanel = findViewById(R.id.permission_panel)

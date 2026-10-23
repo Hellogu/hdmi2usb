@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.Hdmi2Usb" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

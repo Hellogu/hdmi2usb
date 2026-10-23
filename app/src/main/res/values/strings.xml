@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Hdmi2Usb</string>
+    <string name="no_capture_card">未检测到采集卡…</string>
+    <string name="no_capture_card_exit">未检测到采集卡，即将退出</string>
+    <string name="camera_unavailable">相机不可用（可能被占用）</string>
+    <string name="permission_rationale">需要相机权限才能显示采集卡画面（UVC 设备走相机栈）</string>
+    <string name="permission_denied">相机权限被拒绝，无法显示画面</string>
+    <string name="retry_grant">重新授权</string>
+</resources>

@@ -60,7 +60,7 @@ MainActivity（唯一 Activity：全屏沉浸式、KEEP_SCREEN_ON、权限申请
 1. **流选择策略（StreamSelector，纯函数）**：数据驱动，从 `StreamConfigurationMap` 中选择：
    - 优先 MJPEG 流（采集卡 60fps 档位通常仅 MJPEG 可用）；
    - 分辨率不超过屏幕分辨率的前提下取最大；同分辨率取最高帧率；
-   - 兜底序列：最大分辨率 → 720p → 480p 逐级降级。
+   - 全部候选均超屏时不过滤，按超屏程度升序取最接近屏幕的档位。
 2. **权限**：UVC 设备走相机栈，需要 `android.permission.CAMERA` 运行时权限，首次启动申请一次。
 3. **方向**：不锁定方向，内容按比例适配当前窗口；副屏场景平板通常横放。
 4. **缩放切换**：双击手势在 FIT ↔ STRETCH 间切换，实现为 DisplayView 重新布局，不重建相机会话。
@@ -72,7 +72,7 @@ MainActivity（唯一 Activity：全屏沉浸式、KEEP_SCREEN_ON、权限申请
 | 拒绝 CAMERA 权限 | 显示说明页 + "重新授权"按钮，不进主界面 |
 | 枚举不到 EXTERNAL 摄像头 | 提示"未检测到采集卡"，2 秒间隔自动重试，上限 3 次后退出 |
 | 相机被占用（CameraAccessException / in use） | 提示后直接退出 |
-| 会话中断（onDisconnected / onError） | 重开相机 1 次；再失败则退出 |
+| 会话中断（onDisconnected / onError） | onDisconnected 重开相机 1 次，再失败则退出；onError 直接退出 |
 | 流协商失败 | 按兜底序列逐级降级重试 |
 
 所有退出路径先同步关闭 CameraDevice/CaptureSession，再 finish()。

@@ -37,6 +37,7 @@ class CameraController(context: Context, private val listener: CameraListener) {
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var reopenedOnce = false
+    @Volatile
     private var released = false
 
     fun findExternalCamera(): String? =
@@ -65,17 +66,21 @@ class CameraController(context: Context, private val listener: CameraListener) {
     }
 
     fun start(id: String, holder: SurfaceHolder) {
-        cameraId = id
-        this.holder = holder
-        val frame = holder.surfaceFrame
-        candidates = enumerateStreams(id, frame.width(), frame.height())
-        if (candidates.isEmpty()) {
-            mainHandler.post { listener.onUnavailable() }
-            return
+        if (released) return
+        cameraHandler.post {
+            if (released) return@post
+            cameraId = id
+            this.holder = holder
+            val frame = holder.surfaceFrame
+            candidates = enumerateStreams(id, frame.width(), frame.height())
+            if (candidates.isEmpty()) {
+                mainHandler.post { listener.onUnavailable() }
+                return@post
+            }
+            candidateIndex = 0
+            reopenedOnce = false
+            openCamera()
         }
-        candidateIndex = 0
-        reopenedOnce = false
-        openCamera()
     }
 
     @SuppressLint("MissingPermission")

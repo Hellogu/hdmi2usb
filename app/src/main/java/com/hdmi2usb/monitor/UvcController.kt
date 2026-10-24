@@ -21,6 +21,8 @@ interface StreamListener {
     fun onStreamReady(width: Int, height: Int)
     /** 流不可用，应提示并退出（主线程回调）。 */
     fun onUnavailable()
+    /** 看门狗超时：流启动但持续无帧（如 HDMI 无信号），可自动恢复（主线程回调）。 */
+    fun onNoSignal()
 }
 
 class UvcController(context: Context, private val listener: StreamListener) {
@@ -182,7 +184,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
     }
 
     private fun onStreamError() {
-        mainHandler.post { listener.onUnavailable() }
+        mainHandler.post { listener.onNoSignal() }
     }
 
     /** 自上次调用以来渲染层收到的帧数（流未启动/已关闭时返回 null），供 UI 每秒统计 fps。 */

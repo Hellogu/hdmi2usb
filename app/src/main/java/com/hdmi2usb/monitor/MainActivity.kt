@@ -35,10 +35,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private var streaming = false
     private var starting = false
     private var waitingPermission = false
+    // 无信号恢复循环：watchdog 无帧后不退出，改为提示并每 2 秒自动重启流等待源恢复
+    private var waitingSignal = false
     private var pendingDevice: UsbDevice? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val reopenRunnable = Runnable { tryOpenStream() }
+
+    private val signalRetryRunnable = Runnable { retryAfterNoSignal() }
 
     // 每秒读一次渲染层收帧计数（takeFrameCount 自清零），差值即实际 fps
     private val statsRunnable = object : Runnable {
@@ -104,8 +108,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     }
 
     private fun tryOpenStream() {
-        // streaming/starting/waitingPermission 三重守卫，防止重试回调/重复插卡/面板等待期重复 start
-        if (streaming || starting || waitingPermission) return
+        // streaming/starting/waitingPermission/waitingSignal 守卫，防止重试回调/重复插卡/面板等待期重复 start
+        if (streaming || starting || waitingPermission || waitingSignal) return
         val c = controller ?: return
         val device = pendingDevice ?: c.findDevice()
         pendingDevice = device
@@ -198,6 +202,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         if (starting) return
         val c = controller ?: return
         val device = pendingDevice ?: c.findDevice() ?: return
+        waitingSignal = false
+        mainHandler.removeCallbacks(signalRetryRunnable)
+        statusText.visibility = View.GONE
         streaming = false
         starting = true
         c.start(device, displayView.surfaceView.holder, preferred)
@@ -243,6 +250,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onStreamReady(width: Int, height: Int) {
         starting = false
         streaming = true
+        waitingSignal = false
+        mainHandler.removeCallbacks(signalRetryRunnable)
+        statusText.visibility = View.GONE
         displayView.onStreamConfigured(width, height)
         // 启动每秒帧率统计（首秒前先展示分辨率占位）
         statsWidth = width
@@ -256,17 +266,49 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onUnavailable() {
         starting = false
         streaming = false
+        // 无信号恢复循环中的启动失败：静默等下一轮，不退出
+        if (waitingSignal) return
         mainHandler.removeCallbacks(statsRunnable)
         statsBar.visibility = View.GONE
         Toast.makeText(this, R.string.stream_unavailable, Toast.LENGTH_SHORT).show()
         finish()
     }
 
+    /** 看门狗无帧：进入常驻恢复循环，每 2 秒重启流直到源恢复（拔卡/销毁时打断）。 */
+    override fun onNoSignal() {
+        streaming = false
+        starting = false
+        if (waitingSignal) return
+        waitingSignal = true
+        mainHandler.removeCallbacks(statsRunnable)
+        statsBar.visibility = View.GONE
+        statusText.setText(R.string.no_signal)
+        statusText.visibility = View.VISIBLE
+        mainHandler.postDelayed(signalRetryRunnable, RETRY_INTERVAL_MS)
+    }
+
+    private fun retryAfterNoSignal() {
+        if (!waitingSignal) return
+        val c = controller ?: return
+        val device = pendingDevice ?: c.findDevice()
+        pendingDevice = device
+        if (device == null) {
+            // 卡被拔走：交给 PlugMonitor 的 DETACH 路径处理（close + finish）
+            mainHandler.postDelayed(signalRetryRunnable, RETRY_INTERVAL_MS)
+            return
+        }
+        // start 失败会回调 onUnavailable；waitingSignal 挡住退出，由本循环继续重试
+        c.start(device, displayView.surfaceView.holder, loadPreferred())
+    }
+
     private fun onCaptureCardDetached() {
         starting = false
         streaming = false
         waitingPermission = false
+        waitingSignal = false
         mainHandler.removeCallbacks(statsRunnable)
+        mainHandler.removeCallbacks(signalRetryRunnable)
+        statusText.visibility = View.GONE
         statsBar.visibility = View.GONE
         controller?.close()
         finish()
@@ -276,6 +318,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         super.onDestroy()
         mainHandler.removeCallbacks(reopenRunnable)
         mainHandler.removeCallbacks(statsRunnable)
+        mainHandler.removeCallbacks(signalRetryRunnable)
         plugMonitor?.unregister()
         controller?.close()
     }

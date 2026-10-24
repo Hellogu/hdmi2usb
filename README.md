@@ -13,7 +13,7 @@
 
 ## 硬件与系统要求
 
-- Android 16+（API 36，`minSdk 36`）
+- Android 13+（API 33，`minSdk 33`；在 Android 16 平板与 Android 13 手机上验证）
 - 支持 UVC MJPEG 的 USB 采集卡（MS2130 及兼容型号；其 HDMI 输入支持 4K，USB 输出最高 1080p60）
 - 采集卡通过 OTG 连接平板（USB 口被采集卡占用时，调试请用无线 ADB）
 

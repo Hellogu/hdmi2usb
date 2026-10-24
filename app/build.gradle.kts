@@ -10,7 +10,8 @@ android {
 
     defaultConfig {
         applicationId = "com.hdmi2usb.monitor"
-        minSdk = 36
+        // 33 = OnBackInvokedCallback 最低 API（返回二次确认）；MediaStore RELATIVE_PATH 等均 ≥29 可用
+        minSdk = 33
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"

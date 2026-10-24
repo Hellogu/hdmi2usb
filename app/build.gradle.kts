@@ -30,6 +30,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 个人开源项目：release 直接用 debug 签名，保证 APK 可安装
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

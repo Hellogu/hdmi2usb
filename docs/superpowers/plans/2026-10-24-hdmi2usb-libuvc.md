@@ -13,9 +13,9 @@
 **关键环境事实（本机已验证）：**
 - Windows PowerShell 5，**不支持 `&&` 链式命令**，逐条执行。
 - `JAVA_HOME` 设为 `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot` 后再跑 gradle/sdkmanager。
-- SDK 路径 `C:/Users/tianfeng/AppData/Local/Android/Sdk`，**当前无 NDK、无 CMake**（Task 1 安装）。
-- git 提交统一用 `git -c user.name="tianfeng" -c user.email="tianfeng@local"`。
-- 真机 2410CRP4CC 无线 ADB `192.168.123.240:39511`；**adb 命令常返回 exit code -1 但实际已执行，以输出内容为准，勿看退出码**。
+- SDK 路径 `<ANDROID_SDK_HOME>`，**当前无 NDK、无 CMake**（Task 1 安装）。
+- git 提交统一用 `git -c user.name="<你的名字>" -c user.email="<你的邮箱>"`。
+- 真机 小米平板 无线 ADB `<TABLET-ADB-ADDRESS>`；**adb 命令常返回 exit code -1 但实际已执行，以输出内容为准，勿看退出码**。
 - 构建验证命令：`.\gradlew.bat assembleDebug`（编译）与 `.\gradlew.bat testDebugUnitTest`（单测）。
 
 **已验证的 vendor 库集成事实（写代码前已逐一核对上游 v0.0.7 / v1.0.27 源码）：**
@@ -35,7 +35,7 @@
 - [ ] **Step 1: 定位 sdkmanager**
 
 ```powershell
-Get-ChildItem "C:/Users/tianfeng/AppData/Local/Android/Sdk/cmdline-tools" -Directory | Select-Object -ExpandProperty Name
+Get-ChildItem "<ANDROID_SDK_HOME>/cmdline-tools" -Directory | Select-Object -ExpandProperty Name
 ```
 
 预期输出包含 `latest`（若还有旧版本号目录，用版本号目录路径）。
@@ -44,20 +44,20 @@ Get-ChildItem "C:/Users/tianfeng/AppData/Local/Android/Sdk/cmdline-tools" -Direc
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
-& "C:/Users/tianfeng/AppData/Local/Android/Sdk/cmdline-tools/latest/bin/sdkmanager.bat" --install "ndk;27.2.12479018" "cmake;3.22.1"
+& "<ANDROID_SDK_HOME>/cmdline-tools/latest/bin/sdkmanager.bat" --install "ndk;27.2.12479018" "cmake;3.22.1"
 ```
 
 预期：进度条下载约 2GB 后结束。若报 license 未接受，先执行下面这条并在提问时逐个输入 `y` 回车，然后重跑 Step 2：
 
 ```powershell
-& "C:/Users/tianfeng/AppData/Local/Android/Sdk/cmdline-tools/latest/bin/sdkmanager.bat" --licenses
+& "<ANDROID_SDK_HOME>/cmdline-tools/latest/bin/sdkmanager.bat" --licenses
 ```
 
 - [ ] **Step 3: 验证安装结果**
 
 ```powershell
-Get-ChildItem "C:/Users/tianfeng/AppData/Local/Android/Sdk/ndk" | Select-Object -ExpandProperty Name
-Get-ChildItem "C:/Users/tianfeng/AppData/Local/Android/Sdk/cmake" | Select-Object -ExpandProperty Name
+Get-ChildItem "<ANDROID_SDK_HOME>/ndk" | Select-Object -ExpandProperty Name
+Get-ChildItem "<ANDROID_SDK_HOME>/cmake" | Select-Object -ExpandProperty Name
 ```
 
 预期：ndk 下有 `27.2.12479018`，cmake 下有 `3.22.1`。
@@ -111,7 +111,7 @@ Test-Path app\src\main\cpp\third_party\libuvc\include\libuvc\utlist.h
 
 ```powershell
 git add app/src/main/cpp/third_party
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: vendor libuvc v0.0.7 与 libusb v1.0.27 官方源码进仓库"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: vendor libuvc v0.0.7 与 libusb v1.0.27 官方源码进仓库"
 ```
 
 ---
@@ -260,7 +260,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
 
 ```powershell
 git add app/src/main/cpp/CMakeLists.txt app/src/main/cpp/uvc_jni.c app/build.gradle.kts
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: NDK/CMake 构建接线，libuvc+libusb 静态编译通过（桩 JNI）"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: NDK/CMake 构建接线，libuvc+libusb 静态编译通过（桩 JNI）"
 ```
 
 ---
@@ -410,7 +410,7 @@ class PlugMonitor(
 
 ```powershell
 git add app/src/main/java/com/hdmi2usb/monitor/UsbDevices.kt app/src/main/java/com/hdmi2usb/monitor/PlugMonitor.kt app/src/test/java/com/hdmi2usb/monitor/UsbDevicesTest.kt
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: 提取 UsbDevices.isVideo 共享视频设备判定，PlugMonitor 改用之（TDD）"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: 提取 UsbDevices.isVideo 共享视频设备判定，PlugMonitor 改用之（TDD）"
 ```
 
 ---
@@ -530,7 +530,7 @@ object UvcFormats {
 
 ```powershell
 git add app/src/main/java/com/hdmi2usb/monitor/UvcFormats.kt app/src/test/java/com/hdmi2usb/monitor/UvcFormatsTest.kt
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: UVC 格式扁平数组映射 StreamOption 并 cap 帧率 30（TDD）"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: UVC 格式扁平数组映射 StreamOption 并 cap 帧率 30（TDD）"
 ```
 
 ---
@@ -767,7 +767,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
 
 ```powershell
 git add app/src/main/cpp/uvc_jni.c
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: uvc_jni 完整实现（fd 注入、MJPEG 枚举、取流、帧回调、看门狗）"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: uvc_jni 完整实现（fd 注入、MJPEG 枚举、取流、帧回调、看门狗）"
 ```
 
 ---
@@ -1071,7 +1071,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
 
 ```powershell
 git add app/src/main/java/com/hdmi2usb/monitor/UvcController.kt app/src/main/java/com/hdmi2usb/monitor/FrameRenderer.kt
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: UvcController（授权/取流/逐候选降级）与 conflate 渲染线程"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: UvcController（授权/取流/逐候选降级）与 conflate 渲染线程"
 ```
 
 ---
@@ -1360,7 +1360,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot'
 
 ```powershell
 git add app/src/main/java/com/hdmi2usb/monitor/MainActivity.kt app/src/main/AndroidManifest.xml app/src/main/res/values/strings.xml app/src/main/res/xml/device_filter.xml
-git -c user.name="tianfeng" -c user.email="tianfeng@local" commit -m "feat: MainActivity 切换 UvcController 直连与 USB 授权流，删除 Camera2 残留"
+git -c user.name="<你的名字>" -c user.email="<你的邮箱>" commit -m "feat: MainActivity 切换 UvcController 直连与 USB 授权流，删除 Camera2 残留"
 ```
 
 ---
@@ -1403,7 +1403,7 @@ git status
 - [ ] **Step 1: 连接设备并安装**
 
 ```powershell
-adb connect 192.168.123.240:39511
+adb connect <TABLET-ADB-ADDRESS>
 adb devices
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```

@@ -7,7 +7,7 @@
 
 ## 背景与动机
 
-Camera2 路线在目标设备（小米平板 2410CRP4CC，HyperOS Android 16/API 36）真机验证失败，且不可修复：
+Camera2 路线在目标设备（小米平板 小米平板，HyperOS Android 16/API 36）真机验证失败，且不可修复：
 
 1. MIUI 在 `getCameraIdList()` 对普通应用过滤外接相机（已用 ID 段 probe 绕过，提交 7e734b6）。
 2. 高通 external HAL 对该 UVC 采集卡每次出流约 4ms 后报 `ERROR_CAMERA_DEVICE(4)`，重开相机同样失败。
@@ -101,7 +101,7 @@ native 侧失败（枚举无 MJPEG 格式、probe/commit 失败、开流失败�
 ## 测试与验收
 
 - 单元测试（JVM）：`StreamSelector`、`ScreenFit` 保留；新增 UVC 格式数组 → StreamOption 映射的单测（含空数组、超屏过滤、fps cap、降序）。
-- 真机验收（无线 ADB 192.168.123.240:39511，采集卡占用 OTG 口）：
+- 真机验收（无线 ADB <TABLET-ADB-ADDRESS>，采集卡占用 OTG 口）：
   1. 首次打开出现 USB 授权弹窗，允许后出流
   2. 画面正常、无花屏，双击 FIT/STRETCH 切换（只重布局，不重启流）
   3. 拔卡 → 退出；重插 → 自启（不重复弹授权窗）

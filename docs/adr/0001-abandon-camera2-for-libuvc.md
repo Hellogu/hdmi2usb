@@ -5,7 +5,7 @@
 
 ## 背景
 
-hdmi2usb 目标是把 PC HDMI 画面经 UVC 采集卡显示在 Android 平板上（副屏）。初版采用标准 Camera2 API + external camera HAL 路线，真机（小米平板 2410CRP4CC，HyperOS Android 16/API 36）验证失败且不可修复：
+hdmi2usb 目标是把 PC HDMI 画面经 UVC 采集卡显示在 Android 平板上（副屏）。初版采用标准 Camera2 API + external camera HAL 路线，真机（小米平板 小米平板，HyperOS Android 16/API 36）验证失败且不可修复：
 
 1. MIUI 在 `getCameraIdList()` 对普通应用过滤外接相机（可用 ID 段探测绕过，提交 7e734b6）。
 2. 高通 external HAL 对该采集卡每次开流约 4ms 后报 `ERROR_CAMERA_DEVICE(4)`，重开相机同样失败——HAL 层问题，应用层无解。

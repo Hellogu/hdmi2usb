@@ -7,3 +7,9 @@ local.properties
 captures/
 .cxx/
 
+# 密钥与产物，防止误提交
+*.jks
+*.keystore
+*.apk
+.DS_Store
+

@@ -1,9 +1,8 @@
 package com.hdmi2usb.monitor
 
-import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.os.Handler
@@ -17,7 +16,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 
-class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
+class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private lateinit var displayView: DisplayView
     private lateinit var statusText: TextView
@@ -25,15 +24,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     private lateinit var permissionText: TextView
     private lateinit var permissionButton: Button
 
-    private var controller: CameraController? = null
+    private var controller: UvcController? = null
     private var plugMonitor: PlugMonitor? = null
     private var surfaceReady = false
     private var retryCount = 0
     private var streaming = false
     private var starting = false
+    private var waitingPermission = false
+    private var pendingDevice: UsbDevice? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val reopenRunnable = Runnable { tryOpenCamera() }
+    private val reopenRunnable = Runnable { tryOpenStream() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,14 +51,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
         permissionText = findViewById(R.id.permission_text)
         permissionButton = findViewById(R.id.btn_grant)
         displayView.surfaceView.holder.addCallback(this)
-        permissionButton.setOnClickListener {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAMERA)
-        }
-        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startPipeline()
-        } else {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAMERA)
-        }
+        permissionButton.setOnClickListener { requestUsbPermission() }
+        // 冷启动入口：可能是 launcher 直接打开，也可能带 EXTRA_DEVICE 的 attach intent
+        handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -65,40 +61,33 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
         // singleTask：app 存活时再次插入采集卡，重置重试并重新打开
         if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED && surfaceReady) {
             retryCount = 0
-            tryOpenCamera()
+            handleIntent(intent)
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQ_CAMERA) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            permissionPanel.visibility = View.GONE
-            startPipeline()
-        } else {
-            permissionText.setText(R.string.permission_denied)
-            permissionButton.setText(R.string.retry_grant)
-            permissionPanel.visibility = View.VISIBLE
+    /** attach 直连：优先取 intent 的 EXTRA_DEVICE（仍经 isVideo 验证），没有才回退设备枚举。 */
+    private fun handleIntent(intent: Intent?) {
+        val extra = intent?.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        if (extra != null && UsbDevices.isVideo(extra)) {
+            pendingDevice = extra
         }
+        startPipeline()
     }
 
     private fun startPipeline() {
         if (plugMonitor == null) plugMonitor = PlugMonitor(this) { onCaptureCardDetached() }
         plugMonitor?.register()
-        if (controller == null) controller = CameraController(this, this)
-        if (surfaceReady) tryOpenCamera()
+        if (controller == null) controller = UvcController(this, this)
+        if (surfaceReady) tryOpenStream()
     }
 
-    private fun tryOpenCamera() {
-        // 已在流或正在建立会话时直接返回，防止重试回调/重复插卡导致对已打开的相机再次 start
-        if (streaming || starting) return
+    private fun tryOpenStream() {
+        // streaming/starting/waitingPermission 三重守卫，防止重试回调/重复插卡/面板等待期重复 start
+        if (streaming || starting || waitingPermission) return
         val c = controller ?: return
-        val id = c.findExternalCamera()
-        if (id == null) {
+        val device = pendingDevice ?: c.findDevice()
+        pendingDevice = device
+        if (device == null) {
             if (retryCount < MAX_RETRIES) {
                 retryCount++
                 statusText.setText(R.string.no_capture_card)
@@ -111,18 +100,45 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
         } else {
             statusText.visibility = View.GONE
             mainHandler.removeCallbacks(reopenRunnable)
-            starting = true
-            c.start(id, displayView.surfaceView.holder)
+            if (c.hasPermission(device)) {
+                starting = true
+                c.start(device, displayView.surfaceView.holder)
+            } else {
+                requestUsbPermission()
+            }
+        }
+    }
+
+    /** 请求 USB 授权；拒绝时面板提示，不自动重弹，只等用户点按钮再请求。 */
+    private fun requestUsbPermission() {
+        if (waitingPermission) return
+        val c = controller ?: return
+        val device = pendingDevice ?: c.findDevice() ?: return
+        waitingPermission = true
+        permissionText.setText(R.string.permission_rationale)
+        permissionButton.setText(R.string.retry_grant)
+        permissionPanel.visibility = View.VISIBLE
+        c.requestPermission(device) { granted ->
+            waitingPermission = false
+            if (granted) {
+                permissionPanel.visibility = View.GONE
+                if (streaming || starting) return@requestPermission
+                starting = true
+                c.start(device, displayView.surfaceView.holder)
+            } else {
+                permissionText.setText(R.string.permission_denied)
+                permissionPanel.visibility = View.VISIBLE
+            }
         }
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
-        if (controller != null) tryOpenCamera()
+        if (controller != null) tryOpenStream()
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        // 旋转/缩放只改变 surface 尺寸，相机输出自动缩放，无需重建会话
+        // 旋转/缩放只改变 surface 尺寸，渲染层下一帧自然画到新尺寸，无需重启流
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -138,13 +154,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     override fun onUnavailable() {
         starting = false
         streaming = false
-        Toast.makeText(this, R.string.camera_unavailable, Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.stream_unavailable, Toast.LENGTH_SHORT).show()
         finish()
     }
 
     private fun onCaptureCardDetached() {
         starting = false
         streaming = false
+        waitingPermission = false
         controller?.close()
         finish()
     }
@@ -157,7 +174,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, CameraListener {
     }
 
     private companion object {
-        const val REQ_CAMERA = 1
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
     }

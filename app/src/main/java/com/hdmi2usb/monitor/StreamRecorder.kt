@@ -2,6 +2,7 @@ package com.hdmi2usb.monitor
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
 import android.os.Handler
 import android.os.SystemClock
@@ -38,7 +39,7 @@ class StreamRecorder(
     private val writer: Thread
     val startedAtRealtime = SystemClock.elapsedRealtime()
     val fileName = "Hdmi2Usb_" +
-        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".avi"
 
     @Volatile private var recording = true
     @Volatile private var frameCount = 0L
@@ -120,8 +121,12 @@ class StreamRecorder(
         mainHandler.post { onFinished(this@StreamRecorder, name) }
     }
 
-    /** 临时文件复制进公共相册 Movies/Hdmi2Usb/，成功返回显示名。 */
+    /**
+     * 临时文件复制进公共相册 Movies/Hdmi2Usb/，成功返回显示名。
+     * 任何失败都清理干净：删除孤儿 IS_PENDING 条目（对用户不可见的隐藏垃圾）与临时文件。
+     */
     private fun publishToGallery(): String? {
+        var uri: Uri? = null
         return try {
             val resolver = appContext.contentResolver
             val values = ContentValues().apply {
@@ -130,22 +135,28 @@ class StreamRecorder(
                 put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/Hdmi2Usb")
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }
-            val uri = resolver.insert(
+            uri = resolver.insert(
                 MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
                 values,
-            ) ?: return null
+            ) ?: return publishFail(null)
             resolver.openOutputStream(uri)?.use { out ->
                 tmpFile.inputStream().use { it.copyTo(out, COPY_BUFFER) }
-            } ?: return null
+            } ?: return publishFail(uri)
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+            if (resolver.update(uri, values, null, null) == 0) return publishFail(uri)
             tmpFile.delete()
             fileName
         } catch (e: Exception) {
             Log.d(TAG, "publish fail: ${e.message}")
-            null
+            publishFail(uri)
         }
+    }
+
+    private fun publishFail(uri: Uri?): String? {
+        if (uri != null) runCatching { appContext.contentResolver.delete(uri, null, null) }
+        tmpFile.delete()
+        return null
     }
 
     private companion object {

@@ -104,7 +104,13 @@ class AudioStreamPlayer(context: Context) {
                 record?.release()
                 continue
             }
-            record.setPreferredDevice(usbIn)
+            // 锁定录音源为 USB 声卡：路由失败（可能录到内置麦克风污染音轨）则放弃该格式
+            if (!record.setPreferredDevice(usbIn)) {
+                Log.d(TAG, "uac record route to usb fail")
+                record.release()
+                recordRef = null
+                continue
+            }
             recordRef = record
 
             // 播放失败不再致命：仅当播放与录制 sink 都不可用时才放弃该格式
@@ -120,8 +126,13 @@ class AudioStreamPlayer(context: Context) {
                 recordRef = null
                 continue
             }
-            // 录音源锁 USB 声卡，播放目标锁内置扬声器：防止系统把输出自动路由到卡的监听口
-            track?.setPreferredDevice(builtinSpeaker())
+            // 播放目标锁内置扬声器：防止系统把输出自动路由到卡的监听口（回环啸叫）
+            // 找不到内置扬声器时保持默认路由（即扬声器），不清除偏好
+            track?.let { t ->
+                builtinSpeaker()?.let { spk ->
+                    if (!t.setPreferredDevice(spk)) Log.d(TAG, "uac track route to speaker fail")
+                }
+            }
 
             val spec = AudioSpec(f.sampleRate, f.inChannels)
             currentSpec = spec

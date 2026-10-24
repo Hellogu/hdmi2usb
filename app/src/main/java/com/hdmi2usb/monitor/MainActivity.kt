@@ -6,11 +6,11 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.StatFs
 import android.os.SystemClock
+import android.os.storage.StorageManager
+import android.util.Log
 import android.view.SurfaceHolder
 import android.view.View
 import android.view.WindowInsets
@@ -262,8 +262,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         waitingSignal = false
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
-        audioPlayer?.stop()   // 切画质重启流期间静音，onStreamReady 后自动恢复
-        stopRecording()       // 切画质按断流策略收尾录制
+        teardownPipeline()    // 切画质按断流策略收尾录制并静音，onStreamReady 后自动恢复
         streaming = false
         starting = true
         c.start(device, displayView.surfaceView.holder, preferred)
@@ -288,8 +287,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             return
         }
         if (!streaming || starting) return
-        val stat = StatFs(Environment.getExternalStorageDirectory().path)
-        if (stat.availableBytes < MIN_FREE_BYTES) {
+        if (!hasFreeSpace()) {
             Toast.makeText(applicationContext, R.string.record_no_space, Toast.LENGTH_SHORT).show()
             return
         }
@@ -308,9 +306,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         updateRecordButton()
     }
 
-    /** 停止录制并复位 UI（收尾入库由写线程异步完成）。 */
+    /** 停止录制并断开帧/音频旁路（收尾入库由写线程异步完成）。 */
     private fun stopRecording() {
         recorder?.stop()
+        resetRecordingState()
+    }
+
+    /** 复位录制会话状态（stopRecording 与过期收尾回调共用）。 */
+    private fun resetRecordingState() {
         recorder = null
         controller?.frameTap = null
         audioPlayer?.setPcmSink(null)
@@ -319,12 +322,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private fun onRecordFinished(finished: StreamRecorder, name: String?) {
         // 仅当收尾的仍是当前会话时复位（手动停止已先置空；期间新起的录制不能误伤）
-        if (recorder === finished) {
-            recorder = null
-            controller?.frameTap = null
-            audioPlayer?.setPcmSink(null)
-            updateRecordButton()
-        }
+        if (recorder === finished) resetRecordingState()
         Toast.makeText(
             applicationContext,
             if (name != null) getString(R.string.record_saved, name)
@@ -343,6 +341,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             recordButton.text = getString(R.string.record_icon)
             recordButton.setTextColor(0xFFFFFFFF.toInt())
         }
+    }
+
+    /** 起录空间底线：公共存储可分配字节 ≥1GB（比 availableBytes 更保守，计入系统保留）。 */
+    private fun hasFreeSpace(): Boolean = try {
+        val sm = getSystemService(StorageManager::class.java)
+        sm.getAllocatableBytes(StorageManager.UUID_DEFAULT) >= MIN_FREE_BYTES
+    } catch (e: Exception) {
+        Log.d(TAG, "query free space fail: ${e.message}")
+        false
     }
 
     override fun onRequestPermissionsResult(
@@ -405,8 +412,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onUnavailable() {
         starting = false
         streaming = false
-        audioPlayer?.stop()
-        stopRecording()
+        teardownPipeline()
         // 恢复循环中的启动失败：提示切为「可能被占用」并继续重试（静默返回会中断恢复循环）
         if (waitingSignal) {
             mainHandler.removeCallbacks(statsRunnable)
@@ -426,8 +432,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onNoSignal() {
         streaming = false
         starting = false
-        audioPlayer?.stop()
-        stopRecording()
+        teardownPipeline()
         if (waitingSignal) return
         waitingSignal = true
         mainHandler.removeCallbacks(statsRunnable)
@@ -456,14 +461,25 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         streaming = false
         waitingPermission = false
         waitingSignal = false
-        audioPlayer?.stop()
-        stopRecording()
+        teardownPipeline()
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
         statsBar.visibility = View.GONE
         controller?.close()
         finish()
+    }
+
+    /** 流拆除共用收尾：音频直通停止 + 录制异步收尾（断流/切画质/拔卡/销毁共用）。 */
+    private fun teardownPipeline() {
+        audioPlayer?.stop()
+        stopRecording()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 决议：息屏/退后台不做后台录制——立即收尾保存（流保持，回到前台画面自动恢复）
+        stopRecording()
     }
 
     override fun onDestroy() {
@@ -473,11 +489,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         mainHandler.removeCallbacks(signalRetryRunnable)
         plugMonitor?.unregister()
         controller?.close()
-        audioPlayer?.stop()
-        stopRecording()
+        teardownPipeline()
     }
 
     private companion object {
+        const val TAG = "Hdmi2Usb"
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
         const val REQ_CAMERA = 1

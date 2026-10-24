@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 设备级：UVC 视频控制类（class 0x0E）与 IAD 封装摄像头（0xEF / subclass 2） -->
-    <usb-device class="14" />
+    <!-- 仅设备级过滤：IAD 封装摄像头（class 0xEF / subclass 2，目标采集卡命中）与标准 UVC（class 0x0E）。
+         注意：不使用 <usb-device> 嵌套 <usb-interface> 写法——部分 ROM 解析异常会丢弃整个 filter -->
     <usb-device class="239" subclass="2" />
-    <!-- 接口级：device class 0x00、interface class 0x0E 的 UVC 设备 -->
-    <usb-device>
-        <usb-interface class="14" />
-    </usb-device>
+    <usb-device class="14" />
 </resources>

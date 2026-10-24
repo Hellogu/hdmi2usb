@@ -89,6 +89,9 @@ static void *watchdog_main(void *arg) {
 
 static uvc_error_t ensure_open(int fd) {
   if (g_devh != NULL) return UVC_SUCCESS;
+  // Android 上 untrusted_app 无权枚举 /dev/bus/usb 与 /sys/bus/usb/devices（SELinux），
+  // fd 注入场景也无需枚举：libusb 官方要求在 init 前设置此选项跳过 device discovery
+  libusb_set_option(NULL, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
   uvc_error_t r = uvc_init(&g_ctx, NULL);
   if (r != UVC_SUCCESS) {
     LOGE("uvc_init fail %d", r);

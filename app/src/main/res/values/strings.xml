@@ -5,5 +5,6 @@
     <string name="stream_unavailable">视频流不可用（可能被占用）</string>
     <string name="permission_rationale">需要 USB 权限才能读取采集卡画面</string>
     <string name="permission_denied">USB 授权被拒绝，无法显示画面</string>
+    <string name="camera_permission_denied">需要相机权限才能申请 USB 视频设备授权，请点击重试</string>
     <string name="retry_grant">重新授权</string>
 </resources>

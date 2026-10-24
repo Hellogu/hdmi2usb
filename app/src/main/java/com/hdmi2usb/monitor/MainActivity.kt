@@ -114,6 +114,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         if (waitingPermission) return
         val c = controller ?: return
         val device = pendingDevice ?: c.findDevice() ?: return
+        // Android 15+ 要求 UVC 设备的 USB 授权请求前置 CAMERA 运行时权限，未持有时先请求
+        if (!hasCameraPermission()) {
+            requestPermissions(arrayOf(android.Manifest.permission.CAMERA), REQ_CAMERA)
+            return
+        }
         waitingPermission = true
         permissionText.setText(R.string.permission_rationale)
         permissionButton.setText(R.string.retry_grant)
@@ -129,6 +134,25 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
                 permissionText.setText(R.string.permission_denied)
                 permissionPanel.visibility = View.VISIBLE
             }
+        }
+    }
+
+    private fun hasCameraPermission(): Boolean =
+        checkSelfPermission(android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_CAMERA) return
+        if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            tryOpenStream()
+        } else {
+            permissionText.setText(R.string.camera_permission_denied)
+            permissionPanel.visibility = View.VISIBLE
         }
     }
 
@@ -176,5 +200,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private companion object {
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
+        const val REQ_CAMERA = 1
     }
 }

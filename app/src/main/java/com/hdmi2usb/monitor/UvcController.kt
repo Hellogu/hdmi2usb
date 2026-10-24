@@ -77,11 +77,13 @@ class UvcController(context: Context, private val listener: StreamListener) {
             )
             permissionRegistered = true
         }
+        // Android 12+ 官方模板：系统需要向结果广播 fill-in EXTRA_PERMISSION_GRANTED，
+        // PendingIntent 必须 FLAG_MUTABLE（IMMUTABLE 会吞掉 fill-in，导致恒读 false）
         val pi = PendingIntent.getBroadcast(
             appContext,
             0,
             Intent(ACTION_USB_PERMISSION).setPackage(appContext.packageName),
-            PendingIntent.FLAG_IMMUTABLE,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         usbManager.requestPermission(device, pi)
     }

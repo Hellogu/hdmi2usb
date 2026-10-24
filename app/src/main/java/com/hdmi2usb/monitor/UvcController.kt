@@ -108,6 +108,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
         val formats = nativeGetStreamFormats(fd)
         Log.d(TAG, "formats=${formats?.size?.div(3)} mjpeg triples")
         if (formats == null || formats.isEmpty()) {
+            releaseConnection()
             postUnavailable()
             return
         }
@@ -120,6 +121,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
         )
         Log.d(TAG, "candidates=${candidates.size} surface=${frame.width()}x${frame.height()}")
         if (candidates.isEmpty()) {
+            releaseConnection()
             postUnavailable()
             return
         }
@@ -135,11 +137,20 @@ class UvcController(context: Context, private val listener: StreamListener) {
                 return
             }
         }
+        releaseConnection()
         postUnavailable()
     }
 
     private fun postUnavailable() {
         mainHandler.post { listener.onUnavailable() }
+    }
+
+    private fun releaseConnection() {
+        try {
+            connection?.close()
+        } catch (_: Exception) {
+        }
+        connection = null
     }
 
     // ==== 以下两个方法由 native 回调（libuvc 取流线程 / 看门狗线程），勿改名 ====
@@ -161,7 +172,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
         released = true
         workHandler.post {
             try {
-                if (streamStarted) nativeStop()
+                nativeStop()
             } catch (_: Exception) {
             }
             streamStarted = false
@@ -170,10 +181,12 @@ class UvcController(context: Context, private val listener: StreamListener) {
             } catch (_: Exception) {
             }
             connection = null
+            // 与 startInternal 同队列串行，此处必然晚于其完成：收口渲染线程并撤销未决主线程回调
+            renderer?.stop()
+            renderer = null
+            mainHandler.removeCallbacksAndMessages(null)
         }
         workThread.quitSafely()
-        renderer?.stop()
-        renderer = null
         if (permissionRegistered) {
             try {
                 appContext.unregisterReceiver(permissionReceiver)

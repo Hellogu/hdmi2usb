@@ -39,5 +39,5 @@
 
 ## 许可证
 
-- `third_party/` 内的 libuvc / libusb 保留其原始许可证（见各目录 LICENSE 文件）
-- 项目本身的许可证待定，复用前请先联系作者
+- 本项目代码以 [MIT](LICENSE) 协议开源
+- `third_party/` 内的 libuvc / libusb 保留其原始许可证（LGPL-2.1，见各目录 LICENSE 文件）

@@ -91,13 +91,30 @@ class UvcController(context: Context, private val listener: StreamListener) {
     /**
      * 启动取流（前提：已获得 USB 授权）。
      * 枚举 MJPEG 格式 → StreamSelector 排序 → 逐候选 nativeStart 降级尝试，全失败才 onUnavailable。
+     * [preferred] 非空时置于候选列表首位（手动锁档），仍保留自动候选兜底。
      */
-    fun start(device: UsbDevice, holder: SurfaceHolder) {
-        workHandler.post { startInternal(device, holder) }
+    fun start(device: UsbDevice, holder: SurfaceHolder, preferred: StreamOption? = null) {
+        workHandler.post { startInternal(device, holder, preferred) }
     }
 
-    private fun startInternal(device: UsbDevice, holder: SurfaceHolder) {
-        if (released || streamStarted) return
+    /** 手动选择菜单数据（依赖最近一次枚举的格式缓存；流未启动时为空）。 */
+    fun manualChoices(): List<StreamOption> =
+        currentFormats?.let { UvcFormats.manualChoices(it) } ?: emptyList()
+
+    private var currentFormats: IntArray? = null
+
+    private fun startInternal(device: UsbDevice, holder: SurfaceHolder, preferred: StreamOption?) {
+        if (released) return
+        // 重启路径（切换分辨率/帧率）：先停旧流并收口旧的渲染与连接，同队列串行无竞态
+        if (streamStarted) {
+            nativeStop()
+            streamStarted = false
+        }
+        renderer?.stop()
+        renderer = null
+        releaseConnection()
+        currentFormats = null
+
         val conn = usbManager.openDevice(device)
         if (conn == null) {
             Log.d(TAG, "openDevice null")
@@ -108,20 +125,23 @@ class UvcController(context: Context, private val listener: StreamListener) {
         val fd = conn.fileDescriptor
 
         val formats = nativeGetStreamFormats(fd)
-        Log.d(TAG, "formats=${formats?.size?.div(3)} mjpeg triples")
+        Log.d(TAG, "formats=${formats?.size?.div(3)} mjpeg triples raw=${formats?.toList()}")
         if (formats == null || formats.isEmpty()) {
             releaseConnection()
             postUnavailable()
             return
         }
+        currentFormats = formats
 
         val frame = holder.surfaceFrame
-        val candidates = StreamSelector.select(
+        val auto = StreamSelector.select(
             UvcFormats.toStreamOptions(formats),
             frame.width(),
             frame.height(),
         )
-        Log.d(TAG, "candidates=${candidates.size} surface=${frame.width()}x${frame.height()}")
+        // 手动档在前优先尝试，失败自动回落（手动档设备不支持/瞬态占用时无需用户重试）
+        val candidates = if (preferred != null) listOf(preferred) + auto else auto
+        Log.d(TAG, "candidates=${candidates.size} surface=${frame.width()}x${frame.height()} preferred=${preferred != null}")
         if (candidates.isEmpty()) {
             releaseConnection()
             postUnavailable()

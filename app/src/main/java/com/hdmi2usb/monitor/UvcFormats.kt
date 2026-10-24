@@ -5,14 +5,13 @@ import android.graphics.ImageFormat
 /**
  * UVC 格式描述符扁平数组 [w0,h0,fps0,w1,h1,fps1,...] → 候选流列表。
  * format 统一填 ImageFormat.JPEG（使 StreamSelector 的压缩优先排序生效）；
- * fps 以描述符最高帧率填 min=max 并 cap 到 [capFps]（USB 2.0 下 1080p60 有丢帧/花屏风险，稳定优先）。
+ * fps 以描述符最高帧率填 min=max。默认不设硬 cap——设备描述符档位即厂商验证过的
+ * 能力（如 MS2130 全档 60fps），自动/手动统一信任枚举结果。
  * 排序与超屏过滤交给 StreamSelector。
  */
 object UvcFormats {
 
-    const val FPS_CAP = 30
-
-    fun toStreamOptions(flat: IntArray, capFps: Int = FPS_CAP): List<StreamOption> {
+    fun toStreamOptions(flat: IntArray, capFps: Int = Int.MAX_VALUE): List<StreamOption> {
         if (flat.size % 3 != 0) return emptyList()
         val options = mutableListOf<StreamOption>()
         var i = 0
@@ -27,5 +26,20 @@ object UvcFormats {
             i += 3
         }
         return options
+    }
+
+    /**
+     * 手动选择菜单项：按分辨率分组（fps 取该组最大值），过滤高度低于 [minHeight] 的档位
+     * （1080p 以下档位用户无需面对），面积降序排列。
+     */
+    fun manualChoices(flat: IntArray, minHeight: Int = 1080): List<StreamOption> {
+        return toStreamOptions(flat)
+            .filter { it.height >= minHeight }
+            .groupBy { it.width to it.height }
+            .map { (size, group) ->
+                val fps = group.maxOf { it.maxFps }
+                StreamOption(ImageFormat.JPEG, size.first, size.second, fps, fps)
+            }
+            .sortedByDescending { it.width.toLong() * it.height }
     }
 }

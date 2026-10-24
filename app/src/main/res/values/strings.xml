@@ -8,4 +8,9 @@
     <string name="camera_permission_denied">需要相机权限才能申请 USB 视频设备授权，请点击重试</string>
     <string name="retry_grant">重新授权</string>
     <string name="stats_format">%1$d×%2$d · %3$d fps</string>
+    <string name="settings_icon">⚙</string>
+    <string name="format_title">画质选择</string>
+    <string name="format_auto">自动（匹配画面尺寸）</string>
+    <string name="format_item">%1$d×%2$d · %3$d fps</string>
+    <string name="cancel">取消</string>
 </resources>

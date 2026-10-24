@@ -1,6 +1,7 @@
 package com.hdmi2usb.monitor
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -20,7 +21,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private lateinit var displayView: DisplayView
     private lateinit var statusText: TextView
+    private lateinit var statsBar: View
     private lateinit var statsText: TextView
+    private lateinit var settingsButton: TextView
     private lateinit var permissionPanel: View
     private lateinit var permissionText: TextView
     private lateinit var permissionButton: Button
@@ -41,7 +44,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private val statsRunnable = object : Runnable {
         override fun run() {
             val count = controller?.takeFrameCount() ?: run {
-                statsText.visibility = View.GONE
+                statsBar.visibility = View.GONE
                 return
             }
             statsText.text = getString(R.string.stats_format, statsWidth, statsHeight, count)
@@ -62,12 +65,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         }
         displayView = findViewById(R.id.display)
         statusText = findViewById(R.id.status_text)
+        statsBar = findViewById(R.id.stats_bar)
         statsText = findViewById(R.id.stats_text)
+        settingsButton = findViewById(R.id.settings_button)
         permissionPanel = findViewById(R.id.permission_panel)
         permissionText = findViewById(R.id.permission_text)
         permissionButton = findViewById(R.id.btn_grant)
         displayView.surfaceView.holder.addCallback(this)
         permissionButton.setOnClickListener { requestUsbPermission() }
+        settingsButton.setOnClickListener { showFormatDialog() }
         // 冷启动入口：可能是 launcher 直接打开，也可能带 EXTRA_DEVICE 的 attach intent
         handleIntent(intent)
     }
@@ -118,7 +124,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             mainHandler.removeCallbacks(reopenRunnable)
             if (c.hasPermission(device)) {
                 starting = true
-                c.start(device, displayView.surfaceView.holder)
+                c.start(device, displayView.surfaceView.holder, loadPreferred())
             } else {
                 requestUsbPermission()
             }
@@ -145,7 +151,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
                 permissionPanel.visibility = View.GONE
                 if (streaming || starting) return@requestPermission
                 starting = true
-                c.start(device, displayView.surfaceView.holder)
+                c.start(device, displayView.surfaceView.holder, loadPreferred())
             } else {
                 permissionText.setText(R.string.permission_denied)
                 permissionPanel.visibility = View.VISIBLE
@@ -156,6 +162,55 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private fun hasCameraPermission(): Boolean =
         checkSelfPermission(android.Manifest.permission.CAMERA) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** 画质选择对话框：自动 + 设备支持且 ≥1080p 的档位（手动档持久化，重启流生效）。 */
+    private fun showFormatDialog() {
+        val choices = controller?.manualChoices().orEmpty()
+        if (choices.isEmpty()) return
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val labels = mutableListOf(getString(R.string.format_auto))
+        labels += choices.map { getString(R.string.format_item, it.width, it.height, it.maxFps) }
+        val cur = loadPreferred()
+        val checked = if (cur == null) 0
+        else choices.indexOfFirst { it.width == cur.width && it.height == cur.height && it.maxFps == cur.maxFps } + 1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.format_title)
+            .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
+                dialog.dismiss()
+                val preferred = if (which == 0) {
+                    prefs.edit().remove(PREF_W).remove(PREF_H).remove(PREF_FPS).apply()
+                    null
+                } else {
+                    val c = choices[which - 1]
+                    prefs.edit()
+                        .putInt(PREF_W, c.width).putInt(PREF_H, c.height).putInt(PREF_FPS, c.maxFps)
+                        .apply()
+                    c
+                }
+                applyPreferred(preferred)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** 应用手动画质：重启取流（手动档失败时自动回落）。 */
+    private fun applyPreferred(preferred: StreamOption?) {
+        if (starting) return
+        val c = controller ?: return
+        val device = pendingDevice ?: c.findDevice() ?: return
+        streaming = false
+        starting = true
+        c.start(device, displayView.surfaceView.holder, preferred)
+    }
+
+    private fun loadPreferred(): StreamOption? {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val w = prefs.getInt(PREF_W, -1)
+        val h = prefs.getInt(PREF_H, -1)
+        val fps = prefs.getInt(PREF_FPS, -1)
+        if (w <= 0 || h <= 0 || fps <= 0) return null
+        return StreamOption(android.graphics.ImageFormat.JPEG, w, h, fps, fps)
+    }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -193,7 +248,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         statsWidth = width
         statsHeight = height
         statsText.text = getString(R.string.stats_format, width, height, 0)
-        statsText.visibility = View.VISIBLE
+        statsBar.visibility = View.VISIBLE
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.postDelayed(statsRunnable, 1_000)
     }
@@ -202,7 +257,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         starting = false
         streaming = false
         mainHandler.removeCallbacks(statsRunnable)
-        statsText.visibility = View.GONE
+        statsBar.visibility = View.GONE
         Toast.makeText(this, R.string.stream_unavailable, Toast.LENGTH_SHORT).show()
         finish()
     }
@@ -212,7 +267,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         streaming = false
         waitingPermission = false
         mainHandler.removeCallbacks(statsRunnable)
-        statsText.visibility = View.GONE
+        statsBar.visibility = View.GONE
         controller?.close()
         finish()
     }
@@ -229,5 +284,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
         const val REQ_CAMERA = 1
+        const val PREFS = "uvc"
+        const val PREF_W = "preferred_w"
+        const val PREF_H = "preferred_h"
+        const val PREF_FPS = "preferred_fps"
     }
 }

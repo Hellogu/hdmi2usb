@@ -6,6 +6,9 @@
     <!-- Android 15+ 要求：请求 UVC 设备 USB 权限前必须持有 CAMERA 权限（UsbUserPermissionManager 强制检查） -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- 采集卡 UAC 音频直通：AudioRecord 从 USB 声卡录音口取流 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:allowBackup="false"
         android:label="@string/app_name"

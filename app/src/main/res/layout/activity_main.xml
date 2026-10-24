@@ -17,6 +17,19 @@
         android:textSize="18sp"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/stats_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:background="#66000000"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/permission_panel"
         android:layout_width="wrap_content"

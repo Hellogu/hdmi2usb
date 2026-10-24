@@ -20,6 +20,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private lateinit var displayView: DisplayView
     private lateinit var statusText: TextView
+    private lateinit var statsText: TextView
     private lateinit var permissionPanel: View
     private lateinit var permissionText: TextView
     private lateinit var permissionButton: Button
@@ -36,6 +37,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private val reopenRunnable = Runnable { tryOpenStream() }
 
+    // 每秒读一次渲染层收帧计数（takeFrameCount 自清零），差值即实际 fps
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            val count = controller?.takeFrameCount() ?: run {
+                statsText.visibility = View.GONE
+                return
+            }
+            statsText.text = getString(R.string.stats_format, statsWidth, statsHeight, count)
+            mainHandler.postDelayed(this, 1_000)
+        }
+    }
+    private var statsWidth = 0
+    private var statsHeight = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -47,6 +62,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         }
         displayView = findViewById(R.id.display)
         statusText = findViewById(R.id.status_text)
+        statsText = findViewById(R.id.stats_text)
         permissionPanel = findViewById(R.id.permission_panel)
         permissionText = findViewById(R.id.permission_text)
         permissionButton = findViewById(R.id.btn_grant)
@@ -173,11 +189,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         starting = false
         streaming = true
         displayView.onStreamConfigured(width, height)
+        // 启动每秒帧率统计（首秒前先展示分辨率占位）
+        statsWidth = width
+        statsHeight = height
+        statsText.text = getString(R.string.stats_format, width, height, 0)
+        statsText.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(statsRunnable)
+        mainHandler.postDelayed(statsRunnable, 1_000)
     }
 
     override fun onUnavailable() {
         starting = false
         streaming = false
+        mainHandler.removeCallbacks(statsRunnable)
+        statsText.visibility = View.GONE
         Toast.makeText(this, R.string.stream_unavailable, Toast.LENGTH_SHORT).show()
         finish()
     }
@@ -186,6 +211,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         starting = false
         streaming = false
         waitingPermission = false
+        mainHandler.removeCallbacks(statsRunnable)
+        statsText.visibility = View.GONE
         controller?.close()
         finish()
     }
@@ -193,6 +220,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onDestroy() {
         super.onDestroy()
         mainHandler.removeCallbacks(reopenRunnable)
+        mainHandler.removeCallbacks(statsRunnable)
         plugMonitor?.unregister()
         controller?.close()
     }

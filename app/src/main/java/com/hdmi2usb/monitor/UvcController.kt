@@ -165,6 +165,9 @@ class UvcController(context: Context, private val listener: StreamListener) {
         mainHandler.post { listener.onUnavailable() }
     }
 
+    /** 自上次调用以来渲染层收到的帧数（流未启动/已关闭时返回 null），供 UI 每秒统计 fps。 */
+    fun takeFrameCount(): Long? = renderer?.takeFrameCount()
+
     /**
      * 唯一生命周期收口：teardown 投递到工作线程串行执行（与 startInternal 同队列，
      * 避免 nativeStop 与进行中的枚举/开流竞态）→ 退渲染线程 → 注销授权广播 → 状态复位。

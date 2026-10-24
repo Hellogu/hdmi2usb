@@ -7,4 +7,5 @@
     <string name="permission_denied">USB 授权被拒绝，无法显示画面</string>
     <string name="camera_permission_denied">需要相机权限才能申请 USB 视频设备授权，请点击重试</string>
     <string name="retry_grant">重新授权</string>
+    <string name="stats_format">%1$d×%2$d · %3$d fps</string>
 </resources>

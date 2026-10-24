@@ -31,6 +31,12 @@ target_compile_definitions(usb1 PRIVATE HAVE_CONFIG_H)
 # ---- libuvc 0.0.7（静态；JPEG 解码关闭） ----
 # libuvc.h 无条件 #include <libuvc/libuvc_config.h> → 由 vendored 模板 configure_file 生成
 set(LIBUVC_GEN ${CMAKE_CURRENT_BINARY_DIR}/gen)
+# 上游由 project(libuvc VERSION 0.0.7) 提供以下变量；本项目顶层 project 名不同，
+# 需显式供给 configure_file 的版本宏，否则模板中 @libuvc_VERSION_...@ 展开为空。
+set(libuvc_VERSION_MAJOR 0)
+set(libuvc_VERSION_MINOR 0)
+set(libuvc_VERSION_PATCH 7)
+set(libuvc_VERSION "0.0.7")
 configure_file(
   ${LIBUVC_DIR}/include/libuvc/libuvc_config.h.in
   ${LIBUVC_GEN}/libuvc/libuvc_config.h

@@ -17,8 +17,8 @@ import android.view.SurfaceHolder
 
 /** 流状态回调（主线程）。由 CameraListener 语义归位改名而来。 */
 interface StreamListener {
-    /** 流已就绪并开始渲染（主线程回调）。 */
-    fun onStreamReady(width: Int, height: Int)
+    /** 流已就绪并开始渲染（主线程回调）。fps 为档位标称帧率。 */
+    fun onStreamReady(width: Int, height: Int, fps: Int)
     /** 流启动失败（设备被占用/枚举失败等）；UI 可退出，或在无信号恢复循环中继续重试（主线程回调）。 */
     fun onUnavailable()
     /** 看门狗超时：流启动但持续无帧（如 HDMI 无信号），可自动恢复（主线程回调）。 */
@@ -156,7 +156,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
                 streamStarted = true
                 renderer = FrameRenderer(holder)
                 mainHandler.post {
-                    listener.onStreamReady(candidate.width, candidate.height)
+                    listener.onStreamReady(candidate.width, candidate.height, candidate.maxFps)
                 }
                 return
             }
@@ -181,7 +181,12 @@ class UvcController(context: Context, private val listener: StreamListener) {
 
     private fun onFrame(frame: ByteArray) {
         renderer?.submit(frame)
+        // 录制旁路：JNI 每帧新建数组（引用独立），tap 必须非阻塞，否则会拖慢取流回调
+        frameTap?.invoke(frame)
     }
+
+    /** 录制等旁路消费者的帧挂钩（libuvc 回调线程调用）。null 表示无旁路。 */
+    @Volatile var frameTap: ((ByteArray) -> Unit)? = null
 
     private fun onStreamError() {
         mainHandler.post { listener.onNoSignal() }

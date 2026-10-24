@@ -16,4 +16,9 @@
     <string name="format_item">%1$d×%2$d · %3$d fps</string>
     <string name="format_more">更多规格…</string>
     <string name="cancel">取消</string>
+    <string name="record_icon">●</string>
+    <string name="record_active">● %1$02d:%2$02d</string>
+    <string name="record_saved">已保存：Movies/Hdmi2Usb/%1$s</string>
+    <string name="record_failed">录制失败，文件未保存</string>
+    <string name="record_no_space">剩余空间不足 1GB，无法开始录制</string>
 </resources>

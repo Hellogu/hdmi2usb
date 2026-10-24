@@ -6,8 +6,11 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
+import android.os.SystemClock
 import android.view.SurfaceHolder
 import android.view.View
 import android.view.WindowInsets
@@ -24,17 +27,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private lateinit var statsBar: View
     private lateinit var statsText: TextView
     private lateinit var settingsButton: TextView
+    private lateinit var recordButton: TextView
     private lateinit var permissionPanel: View
     private lateinit var permissionText: TextView
     private lateinit var permissionButton: Button
 
     private var controller: UvcController? = null
     private var plugMonitor: PlugMonitor? = null
+    private var audioPlayer: AudioStreamPlayer? = null
+    @Volatile private var recorder: StreamRecorder? = null
     private var surfaceReady = false
     private var retryCount = 0
     private var streaming = false
     private var starting = false
     private var waitingPermission = false
+    // RECORD_AUDIO 拒绝后本实例内不再自动重弹（与 USB 权限拒绝只等用户主动操作的风格一致）
+    private var recordPermissionRequested = false
     // 无信号恢复循环：watchdog 无帧后不退出，改为提示并每 2 秒自动重启流等待源恢复
     private var waitingSignal = false
     private var pendingDevice: UsbDevice? = null
@@ -56,11 +64,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             if (count > 0 && statusText.visibility == View.VISIBLE) {
                 statusText.visibility = View.GONE
             }
+            updateRecordButton()
             mainHandler.postDelayed(this, 1_000)
         }
     }
     private var statsWidth = 0
     private var statsHeight = 0
+    private var statsFps = 30
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,12 +86,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         statsBar = findViewById(R.id.stats_bar)
         statsText = findViewById(R.id.stats_text)
         settingsButton = findViewById(R.id.settings_button)
+        recordButton = findViewById(R.id.record_button)
         permissionPanel = findViewById(R.id.permission_panel)
         permissionText = findViewById(R.id.permission_text)
         permissionButton = findViewById(R.id.btn_grant)
         displayView.surfaceView.holder.addCallback(this)
         permissionButton.setOnClickListener { requestUsbPermission() }
         settingsButton.setOnClickListener { showFormatDialog() }
+        recordButton.setOnClickListener { toggleRecord() }
         // 冷启动入口：可能是 launcher 直接打开，也可能带 EXTRA_DEVICE 的 attach intent
         handleIntent(intent)
     }
@@ -108,6 +120,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         if (plugMonitor == null) plugMonitor = PlugMonitor(this) { onCaptureCardDetached() }
         plugMonitor?.register()
         if (controller == null) controller = UvcController(this, this)
+        if (audioPlayer == null) audioPlayer = AudioStreamPlayer(this)
         if (surfaceReady) tryOpenStream()
     }
 
@@ -171,6 +184,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         checkSelfPermission(android.Manifest.permission.CAMERA) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
+    private fun hasRecordPermission(): Boolean =
+        checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** 音频直通跟随视频出画启动；无录音权限时只请求一次，拒绝则本次会话保持无声。 */
+    private fun tryStartAudio() {
+        if (!hasRecordPermission()) {
+            if (!recordPermissionRequested) {
+                recordPermissionRequested = true
+                requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_RECORD)
+            }
+            return
+        }
+        audioPlayer?.start()
+    }
+
     /** 画质选择（两级）：一级=自动+常用档+更多；二级=全部档位。选择持久化，重启流生效。 */
     private fun showFormatDialog() {
         val all = controller?.manualChoices().orEmpty()
@@ -233,6 +262,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         waitingSignal = false
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
+        audioPlayer?.stop()   // 切画质重启流期间静音，onStreamReady 后自动恢复
+        stopRecording()       // 切画质按断流策略收尾录制
         streaming = false
         starting = true
         c.start(device, displayView.surfaceView.holder, preferred)
@@ -247,12 +278,85 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         return StreamOption(android.graphics.ImageFormat.JPEG, w, h, fps, fps)
     }
 
+    // ==== 录制 ====
+
+    /** ⏺ 切换：录制中则停止收尾；未录制时要求流在播、空间充足。 */
+    private fun toggleRecord() {
+        val rec = recorder
+        if (rec != null && rec.isRecording) {
+            stopRecording()
+            return
+        }
+        if (!streaming || starting) return
+        val stat = StatFs(Environment.getExternalStorageDirectory().path)
+        if (stat.availableBytes < MIN_FREE_BYTES) {
+            Toast.makeText(applicationContext, R.string.record_no_space, Toast.LENGTH_SHORT).show()
+            return
+        }
+        // 音频规格取当前直通协商结果；直通未运行（无音轨/无权限）则按决议降级纯视频
+        val spec = audioPlayer?.currentSpec()
+        val newRecorder = StreamRecorder(
+            this, statsWidth, statsHeight, statsFps, spec, mainHandler,
+        ) { r, name -> onRecordFinished(r, name) }
+        if (!newRecorder.startSucceeded) {
+            Toast.makeText(applicationContext, R.string.record_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        recorder = newRecorder
+        audioPlayer?.setPcmSink(newRecorder::onPcm)
+        updateRecordButton()
+    }
+
+    /** 停止录制并复位 UI（收尾入库由写线程异步完成）。 */
+    private fun stopRecording() {
+        recorder?.stop()
+        recorder = null
+        audioPlayer?.setPcmSink(null)
+        updateRecordButton()
+    }
+
+    private fun onRecordFinished(finished: StreamRecorder, name: String?) {
+        // 仅当收尾的仍是当前会话时复位（手动停止已先置空；期间新起的录制不能误伤）
+        if (recorder === finished) {
+            recorder = null
+            audioPlayer?.setPcmSink(null)
+            updateRecordButton()
+        }
+        Toast.makeText(
+            applicationContext,
+            if (name != null) getString(R.string.record_saved, name)
+            else getString(R.string.record_failed),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    private fun updateRecordButton() {
+        val rec = recorder
+        if (rec != null && rec.isRecording) {
+            val sec = (SystemClock.elapsedRealtime() - rec.startedAtRealtime) / 1000
+            recordButton.text = getString(R.string.record_active, (sec / 60).toInt(), (sec % 60).toInt())
+            recordButton.setTextColor(0xFFE53935.toInt())
+        } else {
+            recordButton.text = getString(R.string.record_icon)
+            recordButton.setTextColor(0xFFFFFFFF.toInt())
+        }
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_RECORD) {
+            // 授权成功且视频正在播放：补启音频；拒绝则保持无声，不自动重弹
+            if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                streaming
+            ) {
+                audioPlayer?.start()
+            }
+            return
+        }
         if (requestCode != REQ_CAMERA) return
         if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             tryOpenStream()
@@ -261,7 +365,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             permissionPanel.visibility = View.VISIBLE
         }
     }
-
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
         if (controller != null) tryOpenStream()
@@ -275,7 +378,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         surfaceReady = false
     }
 
-    override fun onStreamReady(width: Int, height: Int) {
+    override fun onStreamReady(width: Int, height: Int, fps: Int) {
         starting = false
         streaming = true
         waitingSignal = false
@@ -288,15 +391,19 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         // 启动每秒帧率统计（首秒前先展示分辨率占位）
         statsWidth = width
         statsHeight = height
+        statsFps = fps
         statsText.text = getString(R.string.stats_format, width, height, 0)
         statsBar.visibility = View.VISIBLE
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.postDelayed(statsRunnable, 1_000)
+        tryStartAudio()
     }
 
     override fun onUnavailable() {
         starting = false
         streaming = false
+        audioPlayer?.stop()
+        stopRecording()
         // 恢复循环中的启动失败：提示切为「可能被占用」并继续重试（静默返回会中断恢复循环）
         if (waitingSignal) {
             mainHandler.removeCallbacks(statsRunnable)
@@ -316,6 +423,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onNoSignal() {
         streaming = false
         starting = false
+        audioPlayer?.stop()
+        stopRecording()
         if (waitingSignal) return
         waitingSignal = true
         mainHandler.removeCallbacks(statsRunnable)
@@ -344,6 +453,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         streaming = false
         waitingPermission = false
         waitingSignal = false
+        audioPlayer?.stop()
+        stopRecording()
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
@@ -359,14 +470,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         mainHandler.removeCallbacks(signalRetryRunnable)
         plugMonitor?.unregister()
         controller?.close()
+        audioPlayer?.stop()
+        stopRecording()
     }
 
     private companion object {
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
         const val REQ_CAMERA = 1
+        const val REQ_RECORD = 2
         // 常用档位门槛：≥720p 面积（1280x720），更低的老式档位进「更多规格」
         const val COMMON_MIN_PIXELS = 1280L * 720
+        const val MIN_FREE_BYTES = 1L shl 30    // 起录底线：剩余空间 ≥1GB
         const val PREFS = "uvc"
         const val PREF_W = "preferred_w"
         const val PREF_H = "preferred_h"

@@ -106,8 +106,8 @@ class AviMuxer(
         i32(40)                                       // biSize
         i32(width)                                    // biWidth
         i32(height)                                   // biHeight（正数=底向上，MJPG 播放器按 JPEG 自解释）
-        i32(1)                                        // biPlanes
-        i32(24)                                       // biBitCount
+        i16(1)                                        // biPlanes
+        i16(24)                                       // biBitCount
         cc("MJPG")                                    // biCompression
         i32(width * height * 3)                       // biSizeImage
         i32(0)

@@ -303,6 +303,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             return
         }
         recorder = newRecorder
+        controller?.frameTap = newRecorder::onFrame
         audioPlayer?.setPcmSink(newRecorder::onPcm)
         updateRecordButton()
     }
@@ -311,6 +312,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private fun stopRecording() {
         recorder?.stop()
         recorder = null
+        controller?.frameTap = null
         audioPlayer?.setPcmSink(null)
         updateRecordButton()
     }
@@ -319,6 +321,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         // 仅当收尾的仍是当前会话时复位（手动停止已先置空；期间新起的录制不能误伤）
         if (recorder === finished) {
             recorder = null
+            controller?.frameTap = null
             audioPlayer?.setPcmSink(null)
             updateRecordButton()
         }

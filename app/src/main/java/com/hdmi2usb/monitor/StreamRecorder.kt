@@ -55,6 +55,8 @@ class StreamRecorder(
         val dir = appContext.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
             ?: appContext.filesDir
         tmpFile = File(dir, "recording_tmp.avi")
+        // 清掉崩溃残留或上一会话收尾未及删除的临时文件，避免两个写线程踩同一文件
+        tmpFile.delete()
         muxer = try {
             AviMuxer(tmpFile, width, height, nominalFps, audioSpec).also { it.start() }
         } catch (e: Exception) {

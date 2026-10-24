@@ -19,7 +19,7 @@ import android.view.SurfaceHolder
 interface StreamListener {
     /** 流已就绪并开始渲染（主线程回调）。 */
     fun onStreamReady(width: Int, height: Int)
-    /** 流不可用，应提示并退出（主线程回调）。 */
+    /** 流启动失败（设备被占用/枚举失败等）；UI 可退出，或在无信号恢复循环中继续重试（主线程回调）。 */
     fun onUnavailable()
     /** 看门狗超时：流启动但持续无帧（如 HDMI 无信号），可自动恢复（主线程回调）。 */
     fun onNoSignal()

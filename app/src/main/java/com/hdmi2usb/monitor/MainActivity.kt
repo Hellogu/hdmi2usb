@@ -52,6 +52,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
                 return
             }
             statsText.text = getString(R.string.stats_format, statsWidth, statsHeight, count)
+            // 首帧到达才收起等待提示：无信号恢复期间提示常驻，避免「显示 2s → 黑屏 10s」闪烁
+            if (count > 0 && statusText.visibility == View.VISIBLE) {
+                statusText.visibility = View.GONE
+            }
             mainHandler.postDelayed(this, 1_000)
         }
     }
@@ -276,7 +280,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         streaming = true
         waitingSignal = false
         mainHandler.removeCallbacks(signalRetryRunnable)
-        statusText.visibility = View.GONE
+        // 恢复循环中流重启成功：占用已解除，提示切回无信号语义；首帧到达后由 statsRunnable 收起
+        if (statusText.visibility == View.VISIBLE) {
+            statusText.setText(R.string.no_signal)
+        }
         displayView.onStreamConfigured(width, height)
         // 启动每秒帧率统计（首秒前先展示分辨率占位）
         statsWidth = width
@@ -290,8 +297,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     override fun onUnavailable() {
         starting = false
         streaming = false
-        // 无信号恢复循环中的启动失败：静默等下一轮，不退出
-        if (waitingSignal) return
+        // 恢复循环中的启动失败：提示切为「可能被占用」并继续重试（静默返回会中断恢复循环）
+        if (waitingSignal) {
+            mainHandler.removeCallbacks(statsRunnable)
+            statsBar.visibility = View.GONE
+            statusText.setText(R.string.stream_busy_retry)
+            statusText.visibility = View.VISIBLE
+            mainHandler.postDelayed(signalRetryRunnable, RETRY_INTERVAL_MS)
+            return
+        }
         mainHandler.removeCallbacks(statsRunnable)
         statsBar.visibility = View.GONE
         Toast.makeText(this, R.string.stream_unavailable, Toast.LENGTH_SHORT).show()
@@ -321,7 +335,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             mainHandler.postDelayed(signalRetryRunnable, RETRY_INTERVAL_MS)
             return
         }
-        // start 失败会回调 onUnavailable；waitingSignal 挡住退出，由本循环继续重试
+        // start 失败回调 onUnavailable：切「被占用」提示并由本循环继续重试
         c.start(device, displayView.surfaceView.holder, loadPreferred())
     }
 

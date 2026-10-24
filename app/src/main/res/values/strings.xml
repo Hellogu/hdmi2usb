@@ -21,4 +21,7 @@
     <string name="record_saved">已保存：Movies/Hdmi2Usb/%1$s</string>
     <string name="record_failed">录制失败，文件未保存</string>
     <string name="record_no_space">剩余空间不足 1GB，无法开始录制</string>
+    <string name="exit_title">退出 Hdmi2Usb？</string>
+    <string name="exit_confirm">退出后 HDMI 画面与声音将停止</string>
+    <string name="exit_ok">退出</string>
 </resources>

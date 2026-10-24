@@ -19,6 +19,8 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 
 class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
@@ -45,12 +47,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     private var recordPermissionRequested = false
     // 无信号恢复循环：watchdog 无帧后不退出，改为提示并每 2 秒自动重启流等待源恢复
     private var waitingSignal = false
+    // 恢复循环重试次数：≥2 次起降档 ≤720p（高规格档在 USB 2.0 等口会协商成功但无帧）
+    private var noSignalRetries = 0
     private var pendingDevice: UsbDevice? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val reopenRunnable = Runnable { tryOpenStream() }
 
     private val signalRetryRunnable = Runnable { retryAfterNoSignal() }
+
+    // targetSdk 36 预测返回下 onBackPressed 不可靠：用 dispatcher 注册返回拦截做退出二次确认
+    private val backCallback = object : OnBackInvokedCallback {
+        override fun onBackInvoked() = confirmExit()
+    }
+    private var exitDialog: AlertDialog? = null
 
     // 每秒读一次渲染层收帧计数（takeFrameCount 自清零），差值即实际 fps
     private val statsRunnable = object : Runnable {
@@ -94,8 +104,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         permissionButton.setOnClickListener { requestUsbPermission() }
         settingsButton.setOnClickListener { showFormatDialog() }
         recordButton.setOnClickListener { toggleRecord() }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback,
+        )
         // 冷启动入口：可能是 launcher 直接打开，也可能带 EXTRA_DEVICE 的 attach intent
         handleIntent(intent)
+    }
+
+    /** 返回键二次确认；确认后真正退出（onStop/onDestroy 完成收尾）。 */
+    private fun confirmExit() {
+        if (exitDialog?.isShowing == true) return
+        exitDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.exit_title)
+            .setMessage(R.string.exit_confirm)
+            .setPositiveButton(R.string.exit_ok) { _, _ -> finish() }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -259,6 +283,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         if (starting) return
         val c = controller ?: return
         val device = pendingDevice ?: c.findDevice() ?: return
+        // 正常播放中点选当前档位：重启流黑屏无收益，直接忽略（无信号状态下仍放行以允许手动重启）
+        if (streaming && preferred != null &&
+            preferred.width == statsWidth && preferred.height == statsHeight &&
+            preferred.maxFps == statsFps
+        ) return
         waitingSignal = false
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
@@ -377,6 +406,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
     }
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
+        // 转屏等场景 surface 销毁重建而流未中断：renderer 还持旧 holder 会永久黑屏，需刷新绑定
+        if (streaming) controller?.refreshRenderer(holder)
         if (controller != null) tryOpenStream()
     }
 
@@ -398,6 +429,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             statusText.setText(R.string.no_signal)
         }
         displayView.onStreamConfigured(width, height)
+        noSignalRetries = 0   // 恢复出画，重置降档计数（下次无信号从原档位重试）
         // 启动每秒帧率统计（首秒前先展示分辨率占位）
         statsWidth = width
         statsHeight = height
@@ -435,6 +467,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         teardownPipeline()
         if (waitingSignal) return
         waitingSignal = true
+        noSignalRetries = 0
         mainHandler.removeCallbacks(statsRunnable)
         statsBar.visibility = View.GONE
         statusText.setText(R.string.no_signal)
@@ -452,8 +485,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
             mainHandler.postDelayed(signalRetryRunnable, RETRY_INTERVAL_MS)
             return
         }
+        noSignalRetries++
+        // 第 1 次重试沿用当前档位（可能只是源瞬时中断）；
+        // 之后降档 ≤720p 并忽略手动锁定：高规格档在 USB 2.0 等口会「协商成功但无帧」，降档才能恢复出画
+        val preferred = if (noSignalRetries == 1) loadPreferred() else null
+        val maxPixels = if (noSignalRetries >= 2) RECOVERY_MAX_PIXELS else Long.MAX_VALUE
         // start 失败回调 onUnavailable：切「被占用」提示并由本循环继续重试
-        c.start(device, displayView.surfaceView.holder, loadPreferred())
+        c.start(device, displayView.surfaceView.holder, preferred, maxPixels)
     }
 
     private fun onCaptureCardDetached() {
@@ -476,20 +514,29 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         stopRecording()
     }
 
+    /** 退后台/熄屏：立即静音并收尾录制（视频流保持，回到前台画面即恢复、onStart 补启音频）。 */
     override fun onStop() {
         super.onStop()
-        // 决议：息屏/退后台不做后台录制——立即收尾保存（流保持，回到前台画面自动恢复）
+        audioPlayer?.stop()
         stopRecording()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // 回前台恢复音频直通（start 幂等；未授权/流未播时 start 内部自行处理为无声）
+        if (streaming && hasRecordPermission()) audioPlayer?.start()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback)
         mainHandler.removeCallbacks(reopenRunnable)
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.removeCallbacks(signalRetryRunnable)
         plugMonitor?.unregister()
-        controller?.close()
+        // 先停音频/录制再关流：防止 close() 异常跳过音频释放（返回后声音仍在的历史问题）
         teardownPipeline()
+        controller?.close()
     }
 
     private companion object {
@@ -500,6 +547,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         const val REQ_RECORD = 2
         // 常用档位门槛：≥720p 面积（1280x720），更低的老式档位进「更多规格」
         const val COMMON_MIN_PIXELS = 1280L * 720
+        // 无信号恢复降档上限：≥2 次重试仍无帧时只试 ≤720p 档位
+        const val RECOVERY_MAX_PIXELS = 1280L * 720
         const val MIN_FREE_BYTES = 1L shl 30    // 起录底线：剩余空间 ≥1GB
         const val PREFS = "uvc"
         const val PREF_W = "preferred_w"

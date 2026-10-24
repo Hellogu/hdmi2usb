@@ -179,6 +179,17 @@ Java_com_hdmi2usb_monitor_UvcController_nativeStart(
   }
 
   uvc_stream_ctrl_t ctrl;
+  // 设备可能残留上一会话的流接口 alt-setting（进程被杀未停流 / 重启路径）：
+  // 先归零所有 streaming 接口，确保随后的 set alt(N) 是 0→N 跳变，
+  // 触发设备固件复位流状态机；否则部分固件（实测 MS2130）对相同 alt 值
+  // 不重置端点，导致「协商成功但零帧」的二次开流死锁
+  uvc_streaming_interface_t *sif;
+  DL_FOREACH(g_devh->info->stream_ifs, sif) {
+    int ra = libusb_set_interface_alt_setting(g_devh->usb_devh, sif->bInterfaceNumber, 0);
+    int rh = libusb_clear_halt(g_devh->usb_devh, sif->bEndpointAddress);
+    LOGD("reset if%d alt0=%d clear_halt(ep%02x)=%d",
+         sif->bInterfaceNumber, ra, sif->bEndpointAddress, rh);
+  }
   r = uvc_get_stream_ctrl_format_size(g_devh, &ctrl, UVC_FRAME_FORMAT_MJPEG,
                                       width, height, fps);
   if (r != UVC_SUCCESS) {

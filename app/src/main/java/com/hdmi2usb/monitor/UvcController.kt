@@ -94,9 +94,24 @@ class UvcController(context: Context, private val listener: StreamListener) {
      * 启动取流（前提：已获得 USB 授权）。
      * 枚举 MJPEG 格式 → StreamSelector 排序 → 逐候选 nativeStart 降级尝试，全失败才 onUnavailable。
      * [preferred] 非空时置于候选列表首位（手动锁档），仍保留自动候选兜底。
+     * [maxPixels] 限制候选档位面积上限（无信号恢复降档用；过滤后为空则不限制）。
      */
-    fun start(device: UsbDevice, holder: SurfaceHolder, preferred: StreamOption? = null) {
-        workHandler.post { startInternal(device, holder, preferred) }
+    fun start(
+        device: UsbDevice,
+        holder: SurfaceHolder,
+        preferred: StreamOption? = null,
+        maxPixels: Long = Long.MAX_VALUE,
+    ) {
+        workHandler.post { startInternal(device, holder, preferred, maxPixels) }
+    }
+
+    /** surface 销毁重建（如转屏）后刷新渲染层：重建 FrameRenderer 绑定新 holder，流本身不中断。 */
+    fun refreshRenderer(holder: SurfaceHolder) {
+        workHandler.post {
+            val old = renderer ?: return@post
+            old.stop()
+            renderer = FrameRenderer(holder)
+        }
     }
 
     /** 手动选择菜单数据（依赖最近一次枚举的格式缓存；流未启动时为空）。 */
@@ -105,13 +120,25 @@ class UvcController(context: Context, private val listener: StreamListener) {
 
     private var currentFormats: IntArray? = null
 
-    private fun startInternal(device: UsbDevice, holder: SurfaceHolder, preferred: StreamOption?) {
+    private fun startInternal(
+        device: UsbDevice,
+        holder: SurfaceHolder,
+        preferred: StreamOption?,
+        maxPixels: Long,
+    ) {
         if (released) return
         // 重启路径（切换分辨率/帧率）：先停旧流并收口旧的渲染与连接，同队列串行无竞态
         if (streamStarted) {
             nativeStop()
             streamStarted = false
+            // MS2130 固件在停流与重开之间需要间隔；切档路径间隔过短会导致二次开流零帧
+            try {
+                Thread.sleep(300)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
         }
+        pendingReady = null
         renderer?.stop()
         renderer = null
         releaseConnection()
@@ -142,7 +169,14 @@ class UvcController(context: Context, private val listener: StreamListener) {
             frame.height(),
         )
         // 手动档在前优先尝试，失败自动回落（手动档设备不支持/瞬态占用时无需用户重试）
-        val candidates = if (preferred != null) listOf(preferred) + auto else auto
+        // 面积上限过滤（无信号恢复降档）：USB 2.0 等口高规格档可能协商成功但无帧，靠降档恢复
+        val filtered = auto.filter { it.width.toLong() * it.height <= maxPixels }
+        val autoList = filtered.ifEmpty { auto }
+        val candidates = if (preferred != null && preferred.width.toLong() * preferred.height <= maxPixels) {
+            listOf(preferred) + autoList
+        } else {
+            autoList
+        }
         Log.d(TAG, "candidates=${candidates.size} surface=${frame.width()}x${frame.height()} preferred=${preferred != null}")
         if (candidates.isEmpty()) {
             releaseConnection()
@@ -154,10 +188,11 @@ class UvcController(context: Context, private val listener: StreamListener) {
             Log.d(TAG, "try ${candidate.width}x${candidate.height}@${candidate.maxFps}")
             if (nativeStart(fd, candidate.width, candidate.height, candidate.maxFps)) {
                 streamStarted = true
+                // 决议：onStreamReady 延迟到首帧到达（libuvc 回调线程 onFrame 里触发）。
+                // nativeStart 成功≠出画（如高帧率档在带宽不足的口上协商成功但零帧），
+                // 提前触发会让 UI 误判出画、并短路无信号恢复的降档计数
+                pendingReady = candidate
                 renderer = FrameRenderer(holder)
-                mainHandler.post {
-                    listener.onStreamReady(candidate.width, candidate.height, candidate.maxFps)
-                }
                 return
             }
         }
@@ -180,10 +215,18 @@ class UvcController(context: Context, private val listener: StreamListener) {
     // ==== 以下两个方法由 native 回调（libuvc 取流线程 / 看门狗线程），勿改名 ====
 
     private fun onFrame(frame: ByteArray) {
+        // 首帧到达：此刻才宣告流就绪（width/height/fps 为实际启动的档位）
+        pendingReady?.let { cand ->
+            pendingReady = null
+            mainHandler.post { listener.onStreamReady(cand.width, cand.height, cand.maxFps) }
+        }
         renderer?.submit(frame)
         // 录制旁路：JNI 每帧新建数组（引用独立），tap 必须非阻塞，否则会拖慢取流回调
         frameTap?.invoke(frame)
     }
+
+    // 首帧回调挂起的档位（null=已触发或未启动）；libuvc 回调线程写，工作线程 stop 时清
+    @Volatile private var pendingReady: StreamOption? = null
 
     /** 录制等旁路消费者的帧挂钩（libuvc 回调线程调用）。null 表示无旁路。 */
     @Volatile var frameTap: ((ByteArray) -> Unit)? = null
@@ -208,6 +251,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
             } catch (_: Exception) {
             }
             streamStarted = false
+            pendingReady = null
             try {
                 connection?.close()   // uvc_close 不关 fd，fd 归这里管
             } catch (_: Exception) {

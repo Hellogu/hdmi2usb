@@ -320,9 +320,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         }
         val scroll = ScrollView(this).apply { addView(list) }
         val cancel = TextView(this).apply {
-            setText(R.string.cancel)
+            setText(R.string.gesture_close)
             textSize = 13f
-            setTextColor(0xFFBDBDBD.toInt())
+            setTextColor(0xFF64D8CB.toInt())
             gravity = Gravity.END
             setPadding(0, (8 * dp).toInt(), 0, 0)
             setOnClickListener { dialog.dismiss() }
@@ -341,7 +341,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         }
         if (options.size > 6) {
             scroll.layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, (360 * dp).toInt(),
+                LinearLayout.LayoutParams.MATCH_PARENT, (260 * dp).toInt(),
             )
         }
         dialog = Dialog(this).apply {

@@ -24,4 +24,7 @@
     <string name="exit_title">退出 Hdmi2Usb？</string>
     <string name="exit_confirm">退出后 HDMI 画面与声音将停止</string>
     <string name="exit_ok">退出</string>
+    <string name="gesture_dialog_msg">单击：显示控制栏\n双击：切换画面比例</string>
+    <string name="gesture_close">关闭</string>
+    <string name="gesture_never">不再提示</string>
 </resources>

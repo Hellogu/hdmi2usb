@@ -2,6 +2,10 @@ package com.hdmi2usb.monitor
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -12,11 +16,14 @@ import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.util.Log
 import android.view.SurfaceHolder
+import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
@@ -56,11 +63,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private val signalRetryRunnable = Runnable { retryAfterNoSignal() }
 
+    // 顶栏自动隐藏（单击画面唤出；录制中常亮——showStats 对录制会话不挂隐藏任务）
+    private val hideStatsRunnable = Runnable { statsBar.visibility = View.GONE }
+
     // targetSdk 36 预测返回下 onBackPressed 不可靠：用 dispatcher 注册返回拦截做退出二次确认
     private val backCallback = object : OnBackInvokedCallback {
         override fun onBackInvoked() = confirmExit()
     }
-    private var exitDialog: AlertDialog? = null
+    private var exitDialog: Dialog? = null
+    private var gestureDialog: Dialog? = null
+    // 本会话已弹过手势引导（切档/断流恢复重新出画不再弹；冷启动重新计数）
+    private var gestureHintShownThisSession = false
 
     // 每秒读一次渲染层收帧计数（takeFrameCount 自清零），差值即实际 fps
     private val statsRunnable = object : Runnable {
@@ -101,6 +114,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         permissionText = findViewById(R.id.permission_text)
         permissionButton = findViewById(R.id.btn_grant)
         displayView.surfaceView.holder.addCallback(this)
+        // 单击画面唤出顶栏（双击仍是 FIT/STRETCH 切换，GestureDetector 内互不干扰）
+        displayView.onSingleTap = { showStats() }
         permissionButton.setOnClickListener { requestUsbPermission() }
         settingsButton.setOnClickListener { showFormatDialog() }
         recordButton.setOnClickListener { toggleRecord() }
@@ -111,15 +126,36 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         handleIntent(intent)
     }
 
-    /** 返回键二次确认；确认后真正退出（onStop/onDestroy 完成收尾）。 */
+    /** 返回键二次确认：深色圆角小卡片，与手势引导弹窗风格一致；确认后真正退出（onStop/onDestroy 完成收尾）。 */
     private fun confirmExit() {
         if (exitDialog?.isShowing == true) return
-        exitDialog = AlertDialog.Builder(this)
-            .setTitle(R.string.exit_title)
-            .setMessage(R.string.exit_confirm)
-            .setPositiveButton(R.string.exit_ok) { _, _ -> finish() }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        val dp = resources.displayMetrics.density
+        fun label(textRes: Int, color: Int, endPad: Int, onClick: () -> Unit): TextView =
+            TextView(this).apply {
+                setText(textRes)
+                textSize = 13f
+                setTextColor(color)
+                setPadding(0, (10 * dp).toInt(), endPad, 0)
+                setOnClickListener { onClick() }
+            }
+        val title = TextView(this).apply {
+            setText(R.string.exit_title)
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, (8 * dp).toInt())
+        }
+        val msg = TextView(this).apply {
+            setText(R.string.exit_confirm)
+            textSize = 13f
+            setTextColor(0xFFBDBDBD.toInt())
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            addView(label(R.string.cancel, 0xFFBDBDBD.toInt(), (20 * dp).toInt()) { exitDialog?.dismiss() })
+            addView(label(R.string.exit_ok, 0xFFE53935.toInt(), 0) { exitDialog?.dismiss(); finish() })
+        }
+        exitDialog = cardDialog(listOf(title, msg, row)).also { it.show() }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -283,11 +319,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         if (starting) return
         val c = controller ?: return
         val device = pendingDevice ?: c.findDevice() ?: return
-        // 正常播放中点选当前档位：重启流黑屏无收益，直接忽略（无信号状态下仍放行以允许手动重启）
-        if (streaming && preferred != null &&
-            preferred.width == statsWidth && preferred.height == statsHeight &&
-            preferred.maxFps == statsFps
-        ) return
+        // 正常播放中点选与当前一致的档位（手动同档，或自动首选恰好等于当前档）：
+        // 重启流黑屏无收益，直接忽略（无信号状态下仍放行以允许手动重启）
+        if (streaming) {
+            val target = preferred ?: c.autoFirstChoice()
+            if (target != null && target.width == statsWidth &&
+                target.height == statsHeight && target.maxFps == statsFps
+            ) return
+        }
         waitingSignal = false
         mainHandler.removeCallbacks(signalRetryRunnable)
         statusText.visibility = View.GONE
@@ -333,6 +372,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         controller?.frameTap = newRecorder::onFrame
         audioPlayer?.setPcmSink(newRecorder::onPcm)
         updateRecordButton()
+        showStats()   // 录制中顶栏常亮（时长反馈 + 随时停录）
     }
 
     /** 停止录制并断开帧/音频旁路（收尾入库由写线程异步完成）。 */
@@ -347,6 +387,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         controller?.frameTap = null
         audioPlayer?.setPcmSink(null)
         updateRecordButton()
+        showStats()   // 录制结束，顶栏回到 5 秒自动隐藏节奏
     }
 
     private fun onRecordFinished(finished: StreamRecorder, name: String?) {
@@ -435,10 +476,82 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         statsHeight = height
         statsFps = fps
         statsText.text = getString(R.string.stats_format, width, height, 0)
-        statsBar.visibility = View.VISIBLE
+        showStats()
         mainHandler.removeCallbacks(statsRunnable)
         mainHandler.postDelayed(statsRunnable, 1_000)
+        showGestureHintOnce()
         tryStartAudio()
+    }
+
+    /** 首次进 app 的手势引导：紧凑深色小卡片，勾选「不再提示」后关闭，之后不再出现。 */
+    private fun showGestureHintOnce() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        if (gestureHintShownThisSession ||
+            prefs.getBoolean(PREF_GESTURE_HINT, false) ||
+            gestureDialog?.isShowing == true
+        ) return
+        gestureHintShownThisSession = true
+        val dp = resources.displayMetrics.density
+        val msg = TextView(this).apply {
+            setText(R.string.gesture_dialog_msg)
+            textSize = 14f
+            setTextColor(0xFFE0E0E0.toInt())
+        }
+        val box = CheckBox(this).apply {
+            setText(R.string.gesture_never)
+            textSize = 13f
+            setTextColor(0xFFBDBDBD.toInt())
+        }
+        val close = TextView(this).apply {
+            setText(R.string.gesture_close)
+            textSize = 13f
+            setTextColor(0xFF64D8CB.toInt())
+            setPadding((16 * dp).toInt(), (10 * dp).toInt(), 0, 0)
+            setOnClickListener {
+                if (box.isChecked) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .edit().putBoolean(PREF_GESTURE_HINT, true).apply()
+                }
+                gestureDialog?.dismiss()
+            }
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(box, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(close)
+        }
+        gestureDialog = cardDialog(listOf(msg, row)).also { it.show() }
+    }
+
+    /** 深色圆角小卡片对话框（240dp 宽），与全屏画面风格一致。 */
+    private fun cardDialog(rows: List<View>): Dialog {
+        val dp = resources.displayMetrics.density
+        val pad = (14 * dp).toInt()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad / 2)
+            rows.forEach { addView(it) }
+            background = GradientDrawable().apply {
+                setColor(0xF21E1E1E.toInt())
+                cornerRadius = 12 * dp
+            }
+        }
+        return Dialog(this).apply {
+            setContentView(card)
+            setCanceledOnTouchOutside(false)
+            window?.apply {
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                setLayout((240 * dp).toInt(), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+        }
+    }
+
+    /** 显示顶栏并重置自动隐藏计时（录制中不挂隐藏任务，常亮）。 */
+    private fun showStats() {
+        mainHandler.removeCallbacks(hideStatsRunnable)
+        statsBar.visibility = View.VISIBLE
+        if (recorder == null) mainHandler.postDelayed(hideStatsRunnable, STATS_AUTOHIDE_MS)
     }
 
     override fun onUnavailable() {
@@ -532,6 +645,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback)
         mainHandler.removeCallbacks(reopenRunnable)
         mainHandler.removeCallbacks(statsRunnable)
+        mainHandler.removeCallbacks(hideStatsRunnable)
         mainHandler.removeCallbacks(signalRetryRunnable)
         plugMonitor?.unregister()
         // 先停音频/录制再关流：防止 close() 异常跳过音频释放（返回后声音仍在的历史问题）
@@ -541,8 +655,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
 
     private companion object {
         const val TAG = "Hdmi2Usb"
+        const val PREF_GESTURE_HINT = "gesture_dialog_dismissed"
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
+        // 顶栏自动隐藏：单击画面显示，无操作 5 秒后隐藏（录制中常亮，见 hideStats）
+        const val STATS_AUTOHIDE_MS = 5_000L
         const val REQ_CAMERA = 1
         const val REQ_RECORD = 2
         // 常用档位门槛：≥720p 面积（1280x720），更低的老式档位进「更多规格」

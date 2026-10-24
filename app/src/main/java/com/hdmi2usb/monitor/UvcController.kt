@@ -120,6 +120,20 @@ class UvcController(context: Context, private val listener: StreamListener) {
 
     private var currentFormats: IntArray? = null
 
+    // 最近一次开流绑定的 surface（自动首选档计算用）
+    @Volatile private var lastHolder: SurfaceHolder? = null
+
+    /** 当前 surface 尺寸下的自动首选档（与 startInternal 自动路径同逻辑）；无缓存时为 null。 */
+    fun autoFirstChoice(): StreamOption? {
+        val formats = currentFormats ?: return null
+        val frame = lastHolder?.surfaceFrame ?: return null
+        return StreamSelector.select(
+            UvcFormats.toStreamOptions(formats),
+            frame.width(),
+            frame.height(),
+        ).firstOrNull()
+    }
+
     private fun startInternal(
         device: UsbDevice,
         holder: SurfaceHolder,
@@ -161,6 +175,7 @@ class UvcController(context: Context, private val listener: StreamListener) {
             return
         }
         currentFormats = formats
+        lastHolder = holder
 
         val frame = holder.surfaceFrame
         val auto = StreamSelector.select(

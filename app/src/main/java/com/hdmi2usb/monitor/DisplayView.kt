@@ -26,6 +26,9 @@ class DisplayView @JvmOverloads constructor(
 
     var onModeChanged: ((ScreenFit.Mode) -> Unit)? = null
 
+    /** 单击画面（与双击切换互不干扰，双击判定期间单击不触发）。 */
+    var onSingleTap: (() -> Unit)? = null
+
     private var streamW = 0
     private var streamH = 0
 
@@ -34,6 +37,11 @@ class DisplayView @JvmOverloads constructor(
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 toggleMode()
+                return true
+            }
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                onSingleTap?.invoke()
                 return true
             }
         },

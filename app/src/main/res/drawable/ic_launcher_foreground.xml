@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  前景：HDMI Type-A 母座正视轮廓（形状取自用户提供 HDMI.svg，path 数据原样复用）
+  + 右侧四条信号流渐隐曲线。深蓝底霓虹青风格（V2）。
+  自适应图标安全区（中心 66dp 圆）内构图：梯形宽约 32dp 居左，信号流向右渐隐。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 辉光垫底：同形放大 10%，半透明青 -->
+    <group
+        android:translateX="21.5"
+        android:translateY="36.6"
+        android:scaleX="0.034"
+        android:scaleY="0.034">
+        <path
+            android:pathData="M859.3,690.1H164.6c-15.4,0 -29.5,-8.2 -36.8,-21.4l-40.9,-73.8c-10.2,-18.5 -35.7,-26.4 -55.3,-29.7C13,562 0,547.8 0,530.7V368.6c0,-19.1 15.8,-34.7 35.3,-34.7h953.4c19.5,0 35.3,15.6 35.3,34.7v162.1c0,18.3 -14.5,33.4 -32.8,34.6 -28.3,5.3 -46,14.9 -54.1,29.5l-40.9,73.8c-7.3,13.3 -21.4,21.5 -36.9,21.5z m-2.2,-42.9z m-691.2,-1.6H858l40.1,-72.3c14.5,-26.1 41.1,-42.9 81.4,-51V378.4h-935v143.8c39.6,7.8 66.9,24.9 81.3,51l40.1,72.4z"
+            android:fillColor="#263EE1FF"
+            android:fillType="evenOdd" />
+    </group>
+
+    <!-- HDMI 主轮廓（用户 SVG path 原样，evenOdd 镂空成描边） -->
+    <group
+        android:translateX="23"
+        android:translateY="38.15"
+        android:scaleX="0.031"
+        android:scaleY="0.031">
+        <path
+            android:pathData="M859.3,690.1H164.6c-15.4,0 -29.5,-8.2 -36.8,-21.4l-40.9,-73.8c-10.2,-18.5 -35.7,-26.4 -55.3,-29.7C13,562 0,547.8 0,530.7V368.6c0,-19.1 15.8,-34.7 35.3,-34.7h953.4c19.5,0 35.3,15.6 35.3,34.7v162.1c0,18.3 -14.5,33.4 -32.8,34.6 -28.3,5.3 -46,14.9 -54.1,29.5l-40.9,73.8c-7.3,13.3 -21.4,21.5 -36.9,21.5z m-2.2,-42.9z m-691.2,-1.6H858l40.1,-72.3c14.5,-26.1 41.1,-42.9 81.4,-51V378.4h-935v143.8c39.6,7.8 66.9,24.9 81.3,51l40.1,72.4z"
+            android:fillColor="#3EE1FF"
+            android:fillType="evenOdd" />
+        <path
+            android:pathData="M133.6,445.2h756.9c12.3,0 22.3,10 22.3,22.3s-10,22.3 -22.3,22.3H133.6c-12.3,0 -22.3,-10 -22.3,-22.3s10,-22.3 22.3,-22.3z"
+            android:fillColor="#3EE1FF" />
+    </group>
+
+    <!-- 信号流：四条弧线向右渐隐，扇形散开 -->
+    <path
+        android:pathData="M57,50.2 C63,50.2 66,46.8 83,44.9"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="57" android:startY="50"
+                android:endX="83" android:endY="45"
+                android:startColor="#FF4DE3FF"
+                android:endColor="#334DE3FF" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M57,52.8 C66,52.8 72,51.2 83,50.4"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="57" android:startY="53"
+                android:endX="83" android:endY="50"
+                android:startColor="#FF4DE3FF"
+                android:endColor="#334DE3FF" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M57,55.4 C65,55.4 71,56.8 83,58.4"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="57" android:startY="55"
+                android:endX="83" android:endY="58"
+                android:startColor="#FF4DE3FF"
+                android:endColor="#334DE3FF" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M57,58 C62,58 68,60.6 83,64.2"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="57" android:startY="58"
+                android:endX="83" android:endY="64"
+                android:startColor="#FF4DE3FF"
+                android:endColor="#334DE3FF" />
+        </aapt:attr>
+    </path>
+</vector>

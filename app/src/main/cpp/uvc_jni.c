@@ -35,6 +35,7 @@ static jmethodID g_mid_on_frame = NULL;        // onFrame([B)V
 static jmethodID g_mid_on_stream_error = NULL; // onStreamError()V
 static pthread_t g_watchdog;
 static volatile int g_streaming = 0;
+static volatile int g_watchdog_started = 0;
 static volatile long g_last_frame_ms = 0;
 
 static long now_ms(void) {
@@ -62,6 +63,7 @@ static void frame_cb(uvc_frame_t *frame, void *user_ptr) {
   if (arr == NULL) return;
   (*env)->SetByteArrayRegion(env, arr, 0, (jsize)frame->data_bytes, (const jbyte *)frame->data);
   (*env)->CallVoidMethod(env, g_thiz, g_mid_on_frame, arr);
+  if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
   (*env)->DeleteLocalRef(env, arr);
 }
 
@@ -77,6 +79,7 @@ static void *watchdog_main(void *arg) {
       LOGW("stream watchdog: no frame for over %d ms", WATCHDOG_TIMEOUT_MS);
       if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) == JNI_OK) {
         (*env)->CallVoidMethod(env, g_thiz, g_mid_on_stream_error);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
       }
       break;
     }
@@ -153,6 +156,7 @@ Java_com_hdmi2usb_monitor_UvcController_nativeGetStreamFormats(
 JNIEXPORT jboolean JNICALL
 Java_com_hdmi2usb_monitor_UvcController_nativeStart(
     JNIEnv *env, jobject thiz, jint fd, jint width, jint height, jint fps) {
+  if (g_streaming) return JNI_FALSE;
   uvc_error_t r = ensure_open(fd);
   if (r != UVC_SUCCESS) return JNI_FALSE;
 
@@ -187,7 +191,11 @@ Java_com_hdmi2usb_monitor_UvcController_nativeStart(
     g_streaming = 0;
     return JNI_FALSE;
   }
-  pthread_create(&g_watchdog, NULL, watchdog_main, NULL);
+  if (pthread_create(&g_watchdog, NULL, watchdog_main, NULL) == 0) {
+    g_watchdog_started = 1;
+  } else {
+    LOGW("watchdog thread create fail");
+  }
   LOGD("streaming started %dx%d@%d", width, height, fps);
   return JNI_TRUE;
 }
@@ -196,6 +204,10 @@ JNIEXPORT void JNICALL
 Java_com_hdmi2usb_monitor_UvcController_nativeStop(JNIEnv *env, jobject thiz) {
   (void)thiz;
   g_streaming = 0;
+  if (g_watchdog_started) {
+    pthread_join(g_watchdog, NULL);
+    g_watchdog_started = 0;
+  }
   if (g_devh != NULL) {
     uvc_stop_streaming(g_devh);
     uvc_close(g_devh);

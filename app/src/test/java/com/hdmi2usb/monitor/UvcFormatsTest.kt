@@ -54,15 +54,16 @@ class UvcFormatsTest {
     }
 
     @Test
-    fun `手动选项过滤低于1080p并按面积降序`() {
+    fun `手动选项全量返回按面积降序`() {
         val choices = UvcFormats.manualChoices(
             intArrayOf(1920, 1080, 60, 1280, 720, 60, 640, 480, 60, 3840, 2160, 30),
         )
-        assertEquals(2, choices.size)
+        assertEquals(4, choices.size)
         assertEquals(3840, choices[0].width)
         assertEquals(30, choices[0].maxFps)
         assertEquals(1920, choices[1].width)
         assertEquals(60, choices[1].maxFps)
+        assertEquals(640, choices[3].width)
     }
 
     @Test

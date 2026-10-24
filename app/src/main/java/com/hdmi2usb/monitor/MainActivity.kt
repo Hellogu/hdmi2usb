@@ -167,34 +167,58 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         checkSelfPermission(android.Manifest.permission.CAMERA) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
-    /** 画质选择对话框：自动 + 设备支持且 ≥1080p 的档位（手动档持久化，重启流生效）。 */
+    /** 画质选择（两级）：一级=自动+常用档+更多；二级=全部档位。选择持久化，重启流生效。 */
     private fun showFormatDialog() {
-        val choices = controller?.manualChoices().orEmpty()
-        if (choices.isEmpty()) return
+        val all = controller?.manualChoices().orEmpty()
+        if (all.isEmpty()) return
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val labels = mutableListOf(getString(R.string.format_auto))
-        labels += choices.map { getString(R.string.format_item, it.width, it.height, it.maxFps) }
+        val common = all.filter { it.width.toLong() * it.height >= COMMON_MIN_PIXELS }
         val cur = loadPreferred()
+        val labels = mutableListOf(getString(R.string.format_auto))
+        labels += common.map { getString(R.string.format_item, it.width, it.height, it.maxFps) }
+        if (all.size > common.size) labels += getString(R.string.format_more)
         val checked = if (cur == null) 0
-        else choices.indexOfFirst { it.width == cur.width && it.height == cur.height && it.maxFps == cur.maxFps } + 1
+        else (common.indexOfFirst { it.width == cur.width && it.height == cur.height && it.maxFps == cur.maxFps } + 1)
+            .takeIf { it > 0 } ?: -1
         AlertDialog.Builder(this)
             .setTitle(R.string.format_title)
             .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
                 dialog.dismiss()
-                val preferred = if (which == 0) {
-                    prefs.edit().remove(PREF_W).remove(PREF_H).remove(PREF_FPS).apply()
-                    null
-                } else {
-                    val c = choices[which - 1]
-                    prefs.edit()
-                        .putInt(PREF_W, c.width).putInt(PREF_H, c.height).putInt(PREF_FPS, c.maxFps)
-                        .apply()
-                    c
+                when {
+                    which == 0 -> {
+                        prefs.edit().remove(PREF_W).remove(PREF_H).remove(PREF_FPS).apply()
+                        applyPreferred(null)
+                    }
+                    which <= common.size -> applyChoice(common[which - 1])
+                    else -> showAllDialog(all)
                 }
-                applyPreferred(preferred)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    /** 二级菜单：全部档位（含常用，便于一次看全）。 */
+    private fun showAllDialog(all: List<StreamOption>) {
+        val cur = loadPreferred()
+        val labels = all.map { getString(R.string.format_item, it.width, it.height, it.maxFps) }
+        val checked = cur?.let {
+            all.indexOfFirst { c -> c.width == it.width && c.height == it.height && c.maxFps == it.maxFps }
+        }?.takeIf { it >= 0 } ?: -1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.format_more)
+            .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
+                dialog.dismiss()
+                applyChoice(all[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun applyChoice(c: StreamOption) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putInt(PREF_W, c.width).putInt(PREF_H, c.height).putInt(PREF_FPS, c.maxFps)
+            .apply()
+        applyPreferred(c)
     }
 
     /** 应用手动画质：重启取流（手动档失败时自动回落）。 */
@@ -327,6 +351,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         const val MAX_RETRIES = 3
         const val RETRY_INTERVAL_MS = 2_000L
         const val REQ_CAMERA = 1
+        // 常用档位门槛：≥720p 面积（1280x720），更低的老式档位进「更多规格」
+        const val COMMON_MIN_PIXELS = 1280L * 720
         const val PREFS = "uvc"
         const val PREF_W = "preferred_w"
         const val PREF_H = "preferred_h"

@@ -29,12 +29,11 @@ object UvcFormats {
     }
 
     /**
-     * 手动选择菜单项：按分辨率分组（fps 取该组最大值），过滤高度低于 [minHeight] 的档位
-     * （1080p 以下档位用户无需面对），面积降序排列。
+     * 手动选择菜单项：按分辨率分组（fps 取该组最大值），面积降序全量返回。
+     * 常用/不常用的划分由 UI 层决定。
      */
-    fun manualChoices(flat: IntArray, minHeight: Int = 1080): List<StreamOption> {
+    fun manualChoices(flat: IntArray): List<StreamOption> {
         return toStreamOptions(flat)
-            .filter { it.height >= minHeight }
             .groupBy { it.width to it.height }
             .map { (size, group) ->
                 val fps = group.maxOf { it.maxFps }

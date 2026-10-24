@@ -12,6 +12,7 @@ import android.hardware.camera2.CaptureRequest
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.util.Log
 import android.util.Range
 import android.view.SurfaceHolder
 
@@ -40,11 +41,33 @@ class CameraController(context: Context, private val listener: CameraListener) {
     @Volatile
     private var released = false
 
-    fun findExternalCamera(): String? =
-        cameraManager.cameraIdList.firstOrNull { id ->
-            cameraManager.getCameraCharacteristics(id)
-                .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_EXTERNAL
+    fun findExternalCamera(): String? {
+        val ids = cameraManager.cameraIdList
+        val fromList = ids.firstOrNull { id ->
+            try {
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_EXTERNAL
+            } catch (_: Exception) {
+                false
+            }
         }
+        if (fromList != null) return fromList
+        // 部分 ROM（如 HyperOS）会把外接 USB 相机从 getCameraIdList() 过滤掉，
+        // 但 getCameraCharacteristics 仍可直接访问。AOSP 外接相机 ID 从 100 起递增，逐个探测。
+        for (probe in 100..110) {
+            val idStr = probe.toString()
+            try {
+                val chars = cameraManager.getCameraCharacteristics(idStr)
+                if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_EXTERNAL) {
+                    Log.d("Hdmi2Usb", "external camera found via probe: $idStr")
+                    return idStr
+                }
+            } catch (_: Exception) {
+                // 该 ID 不存在（未上电或非外接段），继续探测
+            }
+        }
+        return null
+    }
 
     /** 枚举外部相机候选流：压缩格式（MJPEG，对应 JPEG）优先、不超屏幕、按分辨率/帧率降序。 */
     fun enumerateStreams(id: String, screenW: Int, screenH: Int): List<StreamOption> {
@@ -73,6 +96,7 @@ class CameraController(context: Context, private val listener: CameraListener) {
             this.holder = holder
             val frame = holder.surfaceFrame
             candidates = enumerateStreams(id, frame.width(), frame.height())
+            Log.d("Hdmi2Usb", "start: candidates=${candidates.size} surface=${frame.width()}x${frame.height()}")
             if (candidates.isEmpty()) {
                 mainHandler.post { listener.onUnavailable() }
                 return@post
@@ -110,9 +134,16 @@ class CameraController(context: Context, private val listener: CameraListener) {
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
+                    Log.d("Hdmi2Usb", "openCamera onError=$error")
                     camera.close()
                     if (released) return
-                    mainHandler.post { listener.onUnavailable() }
+                    // 廉价 UVC 采集卡在 HAL 层偶发 ERROR_CAMERA_DEVICE，与 onDisconnected 同样给一次重开机会
+                    if (!reopenedOnce) {
+                        reopenedOnce = true
+                        openCamera()
+                    } else {
+                        mainHandler.post { listener.onUnavailable() }
+                    }
                 }
             }, cameraHandler)
         } catch (_: SecurityException) {
@@ -130,6 +161,7 @@ class CameraController(context: Context, private val listener: CameraListener) {
             return
         }
         val candidate = candidates[candidateIndex]
+        Log.d("Hdmi2Usb", "createSession idx=$candidateIndex fmt=${candidate.format} ${candidate.width}x${candidate.height} fps=${candidate.minFps}-${candidate.maxFps}")
         try {
             camera.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(s: CameraCaptureSession) {
@@ -149,13 +181,16 @@ class CameraController(context: Context, private val listener: CameraListener) {
                             }
                         }
                         s.setRepeatingRequest(request.build(), null, cameraHandler)
+                        Log.d("Hdmi2Usb", "repeating request OK, stream ready")
                         mainHandler.post { listener.onStreamReady(candidate.width, candidate.height) }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        Log.d("Hdmi2Usb", "setRepeatingRequest fail: $e")
                         advanceCandidate()
                     }
                 }
 
                 override fun onConfigureFailed(s: CameraCaptureSession) {
+                    Log.d("Hdmi2Usb", "onConfigureFailed")
                     s.close()
                     if (released) return
                     advanceCandidate()

@@ -24,6 +24,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
@@ -273,21 +274,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         val checked = if (cur == null) 0
         else (common.indexOfFirst { it.width == cur.width && it.height == cur.height && it.maxFps == cur.maxFps } + 1)
             .takeIf { it > 0 } ?: -1
-        AlertDialog.Builder(this)
-            .setTitle(R.string.format_title)
-            .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
-                dialog.dismiss()
-                when {
-                    which == 0 -> {
-                        prefs.edit().remove(PREF_W).remove(PREF_H).remove(PREF_FPS).apply()
-                        applyPreferred(null)
-                    }
-                    which <= common.size -> applyChoice(common[which - 1])
-                    else -> showAllDialog(all)
+        choiceCardDialog(getString(R.string.format_title), labels, checked) { which ->
+            when {
+                which == 0 -> {
+                    prefs.edit().remove(PREF_W).remove(PREF_H).remove(PREF_FPS).apply()
+                    applyPreferred(null)
                 }
+                which <= common.size -> applyChoice(common[which - 1])
+                else -> showAllDialog(all)
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        }.show()
     }
 
     /** 二级菜单：全部档位（含常用，便于一次看全）。 */
@@ -297,14 +293,66 @@ class MainActivity : Activity(), SurfaceHolder.Callback, StreamListener {
         val checked = cur?.let {
             all.indexOfFirst { c -> c.width == it.width && c.height == it.height && c.maxFps == it.maxFps }
         }?.takeIf { it >= 0 } ?: -1
-        AlertDialog.Builder(this)
-            .setTitle(R.string.format_more)
-            .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
-                dialog.dismiss()
-                applyChoice(all[which])
+        choiceCardDialog(getString(R.string.format_more), labels, checked) { which ->
+            applyChoice(all[which])
+        }.show()
+    }
+
+    /** 深色卡片单选列表（画质两级菜单），风格与手势/退出卡片一致；选中项青色高亮。 */
+    private fun choiceCardDialog(title: String, options: List<String>, checked: Int, onPick: (Int) -> Unit): Dialog {
+        val dp = resources.displayMetrics.density
+        lateinit var dialog: Dialog
+        val titleView = TextView(this).apply {
+            text = title
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, (6 * dp).toInt())
+        }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        options.forEachIndexed { i, label ->
+            list.addView(TextView(this).apply {
+                text = if (i == checked) "●  $label" else label
+                textSize = 14f
+                setTextColor(if (i == checked) 0xFF64D8CB.toInt() else 0xFFE0E0E0.toInt())
+                setPadding(0, (9 * dp).toInt(), 0, (9 * dp).toInt())
+                setOnClickListener { dialog.dismiss(); onPick(i) }
+            })
+        }
+        val scroll = ScrollView(this).apply { addView(list) }
+        val cancel = TextView(this).apply {
+            setText(R.string.cancel)
+            textSize = 13f
+            setTextColor(0xFFBDBDBD.toInt())
+            gravity = Gravity.END
+            setPadding(0, (8 * dp).toInt(), 0, 0)
+            setOnClickListener { dialog.dismiss() }
+        }
+        val pad = (14 * dp).toInt()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad / 2)
+            addView(titleView)
+            addView(scroll)
+            addView(cancel)
+            background = GradientDrawable().apply {
+                setColor(0xF21E1E1E.toInt())
+                cornerRadius = 12 * dp
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        }
+        if (options.size > 6) {
+            scroll.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, (360 * dp).toInt(),
+            )
+        }
+        dialog = Dialog(this).apply {
+            setContentView(card)
+            setCanceledOnTouchOutside(false)
+            window?.apply {
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                setLayout((280 * dp).toInt(), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+        }
+        return dialog
     }
 
     private fun applyChoice(c: StreamOption) {

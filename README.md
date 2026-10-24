@@ -2,6 +2,10 @@
 
 把 PC、机顶盒、相机等 HDMI 信号源的画面，通过 UVC 采集卡实时显示在 Android 平板上，并支持一键录制。在 MS2130 采集卡 + 小米平板（HyperOS / Android 16）上开发与真机验证。
 
+| 监视画面（1080p50） | 录制中 | 画质选择 |
+|:---:|:---:|:---:|
+| ![主界面](docs/screenshots/main.png) | ![录制中](docs/screenshots/recording.png) | ![画质选择](docs/screenshots/quality.png) |
+
 ## 功能
 
 - **低延迟取流**：USB Host + libuvc 直读采集卡（fd 注入，无需 root），MJPEG 逐帧回调，最高 1080p60
